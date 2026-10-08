@@ -1,0 +1,48 @@
+[project]
+name = "studentdocs-backend"
+version = "0.1.0"
+description = "StudentDocs — administrative document requests (API + worker)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "redis>=5.0",
+    "boto3>=1.34",
+    "celery[redis]>=5.4",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.9",
+    "email-validator>=2.2",
+    "python-multipart>=0.0.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "ASYNC"]
+ignore = ["S101", "UP046"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+"alembic/**" = ["E501"]

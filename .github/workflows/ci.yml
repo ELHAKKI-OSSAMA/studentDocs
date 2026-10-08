@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: studentdocs_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U ci" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      mailpit:
+        image: axllent/mailpit:latest
+        ports: ["1025:1025", "8025:8025"]
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/studentdocs_test
+      DATABASE_URL: postgresql+asyncpg://ci:ci@localhost:5432/studentdocs_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
+      S3_ENDPOINT_URL: http://localhost:8333
+      S3_ACCESS_KEY: ci-access
+      S3_SECRET_KEY: ci-secret-value
+      S3_BUCKET: studentdocs
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
+      MAILPIT_API_URL: http://localhost:8025
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start S3-compatible storage
+        run: |
+          docker run -d --name storage -p 8333:8333 \
+            -e AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY -e AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY \
+            chrislusf/seaweedfs:latest server -s3 -dir=/data
+          for i in $(seq 1 30); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run ruff check . && uv run ruff format --check .
+      - run: uv run python -m app.scripts.init_storage
+      # Verification emails are sent by the worker: run a real one during the tests.
+      - run: uv run celery -A app.worker.celery_app worker --loglevel=WARNING --detach
+      - run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create CI .env
+        run: |
+          cp .env.example .env
+          echo "SEED_DEMO_PASSWORD=Ci-demo-password-2026" >> .env
+      - run: docker compose up -d --build --wait
+      - run: curl -fsS http://localhost:8000/health/ready && curl -fsS http://localhost:3000/api/health
+      - run: docker compose exec -T backend pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: E2E (Playwright)
+        working-directory: frontend
+        run: npm ci && npx playwright install --with-deps chromium && npm run test:e2e
+      - if: failure()
+        run: docker compose logs

@@ -1,0 +1,26 @@
+# Single public entry point: the browser sees one origin, so session cookies stay first-party.
+# Caddy replaces any client-supplied X-Forwarded-For with the real peer address (no trusted
+# upstream proxies are configured), which the backend relies on for rate limiting.
+{
+	admin off
+}
+
+:80 {
+	encode zstd gzip
+
+	request_body {
+		max_size 25MB
+	}
+
+	handle /api/v1/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	header {
+		-Server
+	}
+}

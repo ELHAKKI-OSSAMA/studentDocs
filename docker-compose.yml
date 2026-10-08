@@ -1,0 +1,162 @@
+# Development / MVP stack. Production overrides come in docker-compose.prod.yml (Phase 6).
+name: studentdocs
+
+x-backend-env: &backend-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+  CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_test
+  REDIS_URL: redis://redis:6379/0
+  S3_ENDPOINT_URL: http://storage:8333
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set in .env}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set in .env}
+  S3_BUCKET: ${S3_BUCKET:-studentdocs}
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+  # Only the Caddy entry point (fixed IP) may set X-Forwarded-For.
+  TRUSTED_PROXIES: '["172.30.0.10/32"]'
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  MAIL_FROM: ${MAIL_FROM:-StudentDocs <no-reply@studentdocs.local>}
+  MAILPIT_API_URL: http://mailpit:8025
+  SEED_STUDENT_EMAIL_DOMAIN: ${SEED_STUDENT_EMAIL_DOMAIN:-etu.univ-demo.ma}
+  SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+  RATE_LIMIT_LOGIN_PER_IP: ${RATE_LIMIT_LOGIN_PER_IP:-20}
+  RATE_LIMIT_REGISTER_PER_IP: ${RATE_LIMIT_REGISTER_PER_IP:-10}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-studentdocs}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # S3-compatible object storage for development (SeaweedFS). Any S3 provider works in production.
+  storage:
+    image: chrislusf/seaweedfs:latest
+    command: ["server", "-s3", "-dir=/data", "-ip.bind=0.0.0.0"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+    volumes: [storagedata:/data]
+    ports: ["127.0.0.1:8333:8333"]
+    healthcheck:
+      # Any HTTP answer (403 without credentials) means the S3 gateway is up.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: creates the private bucket (no anonymous access).
+  storage-init:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    command: ["python", "-m", "app.scripts.init_storage"]
+    depends_on:
+      storage: { condition: service_healthy }
+
+  # Dev SMTP sink + web UI (http://localhost:8025) — outgoing mail never leaves the machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+
+  # One-shot: applies database migrations before the API and worker start.
+  migrate:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # One-shot (development only): idempotent catalog seed + demo accounts when SEED_DEMO_PASSWORD is set.
+  seed:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    command: ["python", "-m", "app.scripts.seed"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  backend:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      storage-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+
+  frontend:
+    build: { context: ./frontend }
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+    depends_on:
+      backend: { condition: service_healthy }
+
+  # Public entry point (http://localhost:3000): /api/v1/* → backend, everything else → frontend.
+  web:
+    image: caddy:2-alpine
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports: ["127.0.0.1:3000:80"]
+    networks:
+      default:
+        ipv4_address: 172.30.0.10
+    depends_on:
+      frontend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  pgdata:
+  redisdata:
+  storagedata:

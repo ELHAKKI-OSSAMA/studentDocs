@@ -1,0 +1,118 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* University palette: deep navy primary, neutral slate surfaces. */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.21 0.03 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.03 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.03 260);
+  --primary: oklch(0.36 0.11 262);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.955 0.01 255);
+  --secondary-foreground: oklch(0.28 0.05 262);
+  --muted: oklch(0.955 0.008 255);
+  --muted-foreground: oklch(0.5 0.03 258);
+  --accent: oklch(0.94 0.02 255);
+  --accent-foreground: oklch(0.28 0.06 262);
+  --destructive: oklch(0.577 0.215 27);
+  --success: oklch(0.6 0.15 150);
+  --warning: oklch(0.75 0.15 75);
+  --border: oklch(0.91 0.01 255);
+  --input: oklch(0.89 0.012 255);
+  --ring: oklch(0.55 0.12 262);
+  --sidebar: oklch(0.27 0.07 263);
+  --sidebar-foreground: oklch(0.93 0.015 255);
+  --sidebar-primary: oklch(0.985 0 0);
+  --sidebar-primary-foreground: oklch(0.27 0.07 263);
+  --sidebar-accent: oklch(0.34 0.08 263);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.34 0.06 263);
+  --sidebar-ring: oklch(0.7 0.1 262);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.17 0.02 262);
+    --foreground: oklch(0.95 0.01 255);
+    --card: oklch(0.21 0.025 262);
+    --card-foreground: oklch(0.95 0.01 255);
+    --popover: oklch(0.21 0.025 262);
+    --popover-foreground: oklch(0.95 0.01 255);
+    --primary: oklch(0.72 0.12 260);
+    --primary-foreground: oklch(0.17 0.03 262);
+    --secondary: oklch(0.27 0.03 262);
+    --secondary-foreground: oklch(0.95 0.01 255);
+    --muted: oklch(0.26 0.025 262);
+    --muted-foreground: oklch(0.72 0.02 258);
+    --accent: oklch(0.29 0.04 262);
+    --accent-foreground: oklch(0.95 0.01 255);
+    --destructive: oklch(0.7 0.19 22);
+    --success: oklch(0.72 0.15 150);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.6 0.1 262);
+    --sidebar: oklch(0.2 0.03 263);
+    --sidebar-foreground: oklch(0.9 0.015 255);
+    --sidebar-accent: oklch(0.28 0.05 263);
+    --sidebar-border: oklch(1 0 0 / 8%);
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-latin), var(--font-arabic), system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  html[dir="rtl"] {
+    font-family: var(--font-arabic), var(--font-latin), system-ui, sans-serif;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
