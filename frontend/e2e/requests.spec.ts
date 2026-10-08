@@ -131,6 +131,10 @@ test("full request lifecycle between a student and the administration", async ({
   await admin.getByTestId("issued-input").setInputFiles(pdf("attestation-finale.pdf"));
   await byTestId(admin, "issued-submit").click();
   await expect(byTestId(admin, "document-list").locator("[data-kind=ISSUED]")).toContainText("attestation-finale.pdf");
+  // Phase 3: the final document is scanned by ClamAV before it can be delivered (the page polls).
+  await expect(byTestId(admin, "document-list").locator("[data-kind=ISSUED]")).toHaveAttribute("data-scan", "CLEAN", {
+    timeout: 60_000,
+  });
   await student.reload();
   await expect(byTestId(student, "document-list").locator("[data-kind=ISSUED]")).toHaveCount(0);
 

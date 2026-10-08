@@ -25,6 +25,15 @@ x-backend-env: &backend-env
   SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
   RATE_LIMIT_LOGIN_PER_IP: ${RATE_LIMIT_LOGIN_PER_IP:-20}
   RATE_LIMIT_REGISTER_PER_IP: ${RATE_LIMIT_REGISTER_PER_IP:-10}
+  STORAGE_TENANT: ${STORAGE_TENANT:-default}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+  CLAMAV_HOST: clamav
+  CLAMAV_PORT: "3310"
+  CLAMAV_TIMEOUT_SECONDS: ${CLAMAV_TIMEOUT_SECONDS:-60}
+  CLAMAV_STREAM_MAX_BYTES: ${CLAMAV_STREAM_MAX_BYTES:-26214400}
+  SCAN_QUEUE: documents
+  SCAN_MAX_RETRIES: ${SCAN_MAX_RETRIES:-5}
+  SCAN_RETRY_BASE_SECONDS: ${SCAN_RETRY_BASE_SECONDS:-10}
 
 services:
   postgres:
@@ -78,6 +87,21 @@ services:
     depends_on:
       storage: { condition: service_healthy }
 
+  # Antivirus daemon (clamd on :3310). The image ships a signature database that freshclam refreshes at
+  # start-up (kept in the clamavdb volume).
+  clamav:
+    image: clamav/clamav:1.4
+    environment:
+      # Same value as the backend setting (MAX_UPLOAD_BYTES must stay <= this, checked at start-up).
+      CLAMD_CONF_StreamMaxLength: ${CLAMAV_STREAM_MAX_BYTES:-26214400}
+    volumes: [clamavdb:/var/lib/clamav]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 600s
+
   # Dev SMTP sink + web UI (http://localhost:8025) — outgoing mail never leaves the machine.
   mailpit:
     image: axllent/mailpit:latest
@@ -116,10 +140,13 @@ services:
   worker:
     build: { context: ./backend, target: dev }
     environment: *backend-env
-    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "celery,documents", "--loglevel=INFO", "--concurrency=2"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      storage-init: { condition: service_completed_successfully }
+      # Scans need the antivirus; the API does not (uploads wait in SCANNING, downloads stay closed).
+      clamav: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5"]
       interval: 30s
@@ -160,3 +187,4 @@ volumes:
   pgdata:
   redisdata:
   storagedata:
+  clamavdb:

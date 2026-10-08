@@ -25,13 +25,18 @@ export function useHasPermission(permission: string): boolean {
 export function useApiQuery<T>(
   path: string,
   query?: Record<string, string | number | undefined>,
-  options: { enabled?: boolean; refetchInterval?: number } = {},
+  options: {
+    enabled?: boolean;
+    /** Milliseconds, or a function of the latest data (e.g. poll only while a scan is running). */
+    refetchInterval?: number | ((data: T | undefined) => number | false);
+  } = {},
 ) {
+  const interval = options.refetchInterval;
   return useQuery<T, ApiError>({
     queryKey: ["api", path, query ?? {}],
     queryFn: () => api<T>(path, { query }),
     enabled: options.enabled ?? true,
-    refetchInterval: options.refetchInterval,
+    refetchInterval: typeof interval === "function" ? (q) => interval(q.state.data) : interval,
   });
 }
 

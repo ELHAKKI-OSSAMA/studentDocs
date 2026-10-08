@@ -34,8 +34,14 @@ class Catalog:
 
 async def make_catalog(h: Harness) -> Catalog:
     tag = uuid.uuid4().hex[:8].upper()
-    first = random.randint(3000, 9000)  # noqa: S311
     async with h.app.state.sessionmaker() as db:
+        # Unique year label (labels are unique): pick a year no other test catalog uses yet.
+        while True:
+            first = random.randint(3000, 9000)  # noqa: S311
+            if not await db.scalar(
+                select(AcademicYear.id).where(AcademicYear.label == f"{first}-{first + 1}")
+            ):
+                break
         cat = BranchCategory(code=f"C{tag}", name_i18n={"fr": "Master"}, sort_order=1, is_active=True)
         other = BranchCategory(code=f"O{tag}", name_i18n={"fr": "Licence"}, sort_order=2, is_active=True)
         db.add_all([cat, other])
@@ -124,3 +130,17 @@ async def transition(client: AsyncClient, request_id, to_status: str, comment: s
         json={"to_status": to_status, "comment": comment},
         headers=csrf(client),
     )
+
+
+async def wait_scanned(client: AsyncClient, detail_path: str, seconds: float = 60.0) -> dict:
+    """Polls a request detail until no document is SCANNING anymore (real worker + real ClamAV)."""
+    import asyncio
+
+    deadline = asyncio.get_running_loop().time() + seconds
+    while True:
+        detail = (await client.get(detail_path)).json()
+        if all(d["scan_status"] != "SCANNING" for d in detail["documents"]):
+            return detail
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"Documents still SCANNING after {seconds}s: {detail['documents']}")
+        await asyncio.sleep(0.25)

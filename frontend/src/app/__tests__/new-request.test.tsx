@@ -61,7 +61,11 @@ function setup(enrollments: Enrollment[]) {
       method: "POST",
       path: "/api/v1/requests",
       status: 201,
-      body: { id: "3f2b8c1e-8a5d-4c1e-9b7a-1234567890ab", reference: "REQ-2026-000042" },
+      body: {
+        id: "3f2b8c1e-8a5d-4c1e-9b7a-1234567890ab",
+        reference: "REQ-2026-000042",
+        documents: [{ id: "d1", scan_status: "SCANNING", can_download: false }],
+      },
     },
   ]);
   vi.stubGlobal("fetch", fetchMock);
@@ -136,6 +140,8 @@ describe("New request form", () => {
     fireEvent.click(screen.getByTestId("submit-request"));
 
     expect((await screen.findByTestId("request-reference")).textContent).toBe("REQ-2026-000042");
+    // Never "accepted" before the antivirus: the student is told the file is being scanned.
+    expect(screen.getByTestId("scan-pending-notice").textContent).toContain("analyse antivirus en cours");
     const post = calls.find((c) => c.method === "POST")!;
     const body = post.init.body as FormData;
     expect(JSON.parse(String(body.get("payload"))).items).toEqual([

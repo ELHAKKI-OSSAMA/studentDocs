@@ -9,8 +9,19 @@ Base: `/api/v1` (same origin as the web app, routed by Caddy). OpenAPI: `http://
 - **Errors**: `{"error": {"code", "message", "details", "request_id"}}`. The frontend translates `code`, never `message`.
 - **Authorization**: by permission (table `role_permissions`), not by role. A resource belonging to another student → `404`.
 - **Pagination** (lists): `?limit=1..100&offset=` → `{items, total, limit, offset}`.
-- **Uploads**: `multipart/form-data` only (`415 unsupported_media_type` otherwise). PDF, PNG and JPEG, detected from the content, 10 MB per file, 10 files per call.
-- **Downloads**: streamed by the API after authorization (`Content-Disposition`, `Cache-Control: private, no-store`); storage keys and storage URLs are never exposed.
+- **Uploads**: `multipart/form-data` only (`415 unsupported_media_type` otherwise). PDF, PNG and JPEG, detected from the content (magic bytes); the extension and the declared type must agree with it. `MAX_UPLOAD_BYTES` (10 MB default) per file, 10 files per call. Errors: `file_empty`, `file_too_large`, `file_type_not_allowed`, `file_extension_mismatch`, `file_mime_mismatch`, `file_name_not_allowed` (422).
+- **Antivirus**: every stored file starts `SCANNING` and is scanned asynchronously by ClamAV, then becomes `CLEAN`, `INFECTED` or `ERROR`. Clients poll the request detail.
+- **Downloads**: streamed by the API after authorization, **only for `CLEAN` files** (`409 document_not_available` with `details.scan_status` otherwise). Storage keys and storage URLs are never exposed.
+
+Document object (in request details, message attachments and issued-document lists):
+
+```json
+{"id", "kind", "filename", "mime_type", "size_bytes", "sha256", "scan_status", "scan_reason",
+ "scanned_at", "can_download", "request_item_id", "message_id", "created_at",
+ "original_filename", "scan_detail"}
+```
+
+`scan_reason` is a code (`virus_detected`, `scanner_unavailable`, `scanner_error`, `file_missing`, `scan_failed`). `original_filename` and `scan_detail` (with the signature name) are only filled for staff.
 
 | Common code | HTTP |
 |---|---|
@@ -63,7 +74,7 @@ Another student's request (or document, or message thread) always answers `404`.
 | GET / POST | `/requests/{id}/messages` | Thread; POST multipart `body` + `files` |
 | POST | `/requests/{id}/respond` | Answer an information request: `NEEDS_INFORMATION → IN_REVIEW` |
 | POST | `/requests/{id}/messages/read` | Mark the administration's messages as read |
-| GET | `/requests/{id}/documents/{document_id}/download` | Authorized, audited download |
+| GET | `/requests/{id}/documents/{document_id}/download` | Authorized, audited download (CLEAN files only, `409` otherwise) |
 
 ## Notifications `/notifications` — `profile.self`
 
@@ -86,9 +97,11 @@ Another student's request (or document, or message thread) always answers `404`.
 | GET | `/admin/requests/{id}` | `requests.read` |
 | POST | `/admin/requests/{id}/transitions` `{to_status, comment?}` (state machine; comment required for `NEEDS_INFORMATION`, `REJECTED`, `CANCELLED`) | per transition: `requests.process`, `requests.approve`, `requests.reject` |
 | POST | `/admin/requests/{id}/assign` `{assignee_id \| null}` | `requests.assign` |
-| POST | `/admin/requests/{id}/documents` (multipart `files`, final documents, in `PROCESSING` / `APPROVED`) | `requests.process` |
+| POST | `/admin/requests/{id}/documents` (multipart `files`, final documents, in `PROCESSING` / `APPROVED`; scanned like any upload) | `requests.process` |
+| DELETE | `/admin/requests/{id}/documents/{document_id}` (final document, before delivery: soft delete, object removed, to replace it) | `requests.process` |
+| POST | `/admin/requests/{id}/documents/{document_id}/rescan` (only from `ERROR`, else `409 rescan_not_allowed`) | `requests.process` |
 | GET / POST | `/admin/requests/{id}/messages` · POST `/admin/requests/{id}/messages/read` | `requests.read` / `requests.process` |
-| GET | `/admin/requests/{id}/documents/{document_id}/download` | `requests.read` |
+| GET | `/admin/requests/{id}/documents/{document_id}/download` (CLEAN files only) | `requests.read` |
 | GET | `/admin/catalog/{entity}[/{id}]` | `catalog.read` |
 | POST / PATCH / DELETE | `/admin/catalog/{entity}[/{id}]` | `catalog.manage` |
 
@@ -96,4 +109,4 @@ Another student's request (or document, or message thread) always answers `404`.
 
 ## Health
 
-`GET /health/live`, `GET /health/ready` (database, Redis, storage; returns `503` without detail when a dependency is down).
+`GET /health/live`, `GET /health/ready` (database, Redis, storage, antivirus; returns `503` without detail when a dependency is down).

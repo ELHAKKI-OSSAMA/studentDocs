@@ -81,7 +81,13 @@
     "issued_document_required": "Upload the final document first.",
     "delivery_mode_mismatch": "This status does not match the documents' delivery mode.",
     "invalid_assignee": "This user cannot handle requests.",
-    "concurrent_update": "The request was modified meanwhile. Reload the page."
+    "concurrent_update": "The request was modified meanwhile. Reload the page.",
+    "document_not_available": "This file is not available: the antivirus scan is in progress or failed.",
+    "file_extension_mismatch": "The file extension does not match its content.",
+    "file_mime_mismatch": "The declared file type does not match its content.",
+    "file_name_not_allowed": "This file name is not allowed (dangerous extension).",
+    "issued_document_not_clean": "The final document has not been accepted by the antivirus yet.",
+    "rescan_not_allowed": "Only a file whose scan failed can be scanned again."
   },
   "home": {
     "title": "Your administrative documents, made simple",
@@ -332,7 +338,6 @@
     "keep": "Keep",
     "cancelled": "Request cancelled.",
     "download": "Download",
-    "notScanned": "Files not scanned by an antivirus (scanning comes in a later stage).",
     "kindATTACHMENT": "Supporting document",
     "kindISSUED": "Issued document",
     "kindMESSAGE": "Attachment",
@@ -390,7 +395,9 @@
     "INFORMATION_REQUESTED": "Information is requested for request {reference}.",
     "NEW_MESSAGE": "New message on request {reference}.",
     "INFORMATION_PROVIDED": "The student answered on request {reference}.",
-    "REQUEST_ASSIGNED": "Request {reference} was assigned to you."
+    "REQUEST_ASSIGNED": "Request {reference} was assigned to you.",
+    "DOCUMENT_INFECTED": "Request {reference}: a file you sent was rejected by the antivirus.",
+    "DOCUMENT_SCAN_FAILED": "Request {reference}: the antivirus scan of a file could not complete."
   },
   "enrollments": {
     "title": "Enrollments to verify",
@@ -404,5 +411,25 @@
     "empty": "No enrollments to show.",
     "review": "Review",
     "reviewedBy": "By {name} on {date}"
+  },
+  "scan": {
+    "NOT_SCANNED": "Not scanned",
+    "SCANNING": "Antivirus scan in progress",
+    "CLEAN": "Accepted",
+    "INFECTED": "Rejected: threat detected",
+    "ERROR": "Scan error",
+    "explainNOT_SCANNED": "This file has not been scanned: it stays unavailable.",
+    "explainSCANNING": "File received. It can be downloaded once the antivirus scan is complete.",
+    "explainCLEAN": "File accepted by the antivirus.",
+    "explainINFECTED": "A threat was detected: this file is isolated and will never be delivered. Send another file.",
+    "explainERROR": "The scan could not complete: the file stays unavailable until it is scanned again.",
+    "notice": "Every file is scanned by an antivirus; it can only be downloaded once accepted.",
+    "receivedScanning": "File(s) received: antivirus scan in progress.",
+    "detail": "Scan detail",
+    "originalName": "Original name",
+    "rescan": "Scan again",
+    "rescanQueued": "New scan requested.",
+    "replace": "Delete to replace",
+    "deleted": "File deleted. Upload the new version."
   }
 }

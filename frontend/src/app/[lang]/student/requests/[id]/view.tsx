@@ -17,7 +17,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader, QueryState } from "@/components/page";
-import { DocumentList, MessageThread, RequestInfo, ScanNotice, StatusBadge, Timeline } from "@/components/requests";
+import {
+  DocumentList,
+  hasPendingScan,
+  MessageThread,
+  RequestInfo,
+  SCAN_POLL_MS,
+  ScanNotice,
+  StatusBadge,
+  Timeline,
+} from "@/components/requests";
 import { useI18n } from "@/i18n/client";
 import { api, ApiError } from "@/lib/api/client";
 import { useApiQuery, useInvalidate } from "@/lib/api/hooks";
@@ -73,7 +82,11 @@ function CancelButton({ request }: { request: RequestDetail }) {
 export function RequestView({ id }: { id: string }) {
   const { locale, t } = useI18n();
   const valid = isUuid(id);
-  const request = useApiQuery<RequestDetail>(`/requests/${id}`, undefined, { enabled: valid });
+  const request = useApiQuery<RequestDetail>(`/requests/${id}`, undefined, {
+    enabled: valid,
+    // The worker updates scan results asynchronously: poll only while a file is being scanned.
+    refetchInterval: (data) => (hasPendingScan(data?.documents) ? SCAN_POLL_MS : false),
+  });
   const back = (
     <Link href={`/${locale}/student/requests`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
       <ArrowLeftIcon className="rtl:-scale-x-100" />

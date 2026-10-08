@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.clientip import client_ip
 from app.core.config import Settings
 from app.core.ratelimit import RateLimiter
+from app.documents.service import DocumentPipeline
 from app.documents.storage import ObjectStorage
 
 
@@ -32,6 +33,10 @@ def get_storage(request: Request) -> ObjectStorage:
     return request.app.state.storage
 
 
+def get_documents(request: Request) -> DocumentPipeline:
+    return request.app.state.documents
+
+
 def get_client_ip(request: Request) -> str:
     return client_ip(request, request.app.state.settings.trusted_proxies)
 
@@ -42,3 +47,4 @@ RedisDep = Annotated[Redis, Depends(get_redis)]
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 ClientIp = Annotated[str, Depends(get_client_ip)]
 StorageDep = Annotated[ObjectStorage, Depends(get_storage)]
+DocumentsDep = Annotated[DocumentPipeline, Depends(get_documents)]

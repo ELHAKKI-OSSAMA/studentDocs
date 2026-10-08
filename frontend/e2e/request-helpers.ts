@@ -89,3 +89,15 @@ export function psql(sql: string) {
     stdio: "pipe",
   });
 }
+
+/** EICAR test string assembled at runtime (no file in the repository contains the signature). */
+function eicar(): string {
+  return ["X5O!P%@AP[4\\PZX54(P^)7CC)7}", "$EICAR-STANDARD-", "ANTIVIRUS-TEST-", "FILE!$H+H*"].join("");
+}
+
+/** A valid PDF whose content stream is the EICAR test string: passes format checks, caught by ClamAV. */
+export function eicarPdf(name: string) {
+  const stream = eicar();
+  const body = `%PDF-1.4\n1 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`;
+  return { name, mimeType: "application/pdf", buffer: Buffer.from(body, "latin1") };
+}

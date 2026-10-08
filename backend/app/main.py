@@ -17,6 +17,8 @@ from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.core.storage import create_s3_client
+from app.documents.scanning import celery_scan_queue
+from app.documents.service import DocumentPipeline
 from app.documents.storage import ObjectStorage
 from app.notifications.router import router as notifications_router
 from app.requests.admin_router import router as admin_requests_router
@@ -37,7 +39,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.sessionmaker = create_sessionmaker(app.state.engine)
         app.state.redis = Redis.from_url(settings.redis_url)
         app.state.s3 = create_s3_client(settings)
-        app.state.storage = ObjectStorage(app.state.s3, settings.s3_bucket)
+        app.state.storage = ObjectStorage(app.state.s3, settings.s3_bucket, settings.storage_tenant)
+        app.state.documents = DocumentPipeline(app.state.storage, celery_scan_queue(settings.scan_queue))
         try:
             yield
         finally:

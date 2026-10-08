@@ -13,7 +13,8 @@ Plateforme de gestion des demandes de documents administratifs étudiants : port
 | 0 | Socle : Docker, migrations, santé, CI | ✅ |
 | 1 | Authentification et RBAC, catalogue académique, espaces étudiant et admin, FR/EN/AR | ✅ |
 | 2 | Demandes web (multi-documents, justificatifs), vérification des inscriptions, workflow, attribution, messages, documents délivrés, notifications in-app | ✅ |
-| 3–6 | Antivirus et génération de documents, email et IA, notifications email, durcissement | à venir |
+| 3 | Pipeline documentaire sécurisé : validation stricte, SHA-256, stockage S3 privé, antivirus ClamAV asynchrone (Celery), quarantaine, téléchargement réservé aux fichiers sains | ✅ |
+| 4–6 | Email et IA, notifications email, durcissement | à venir |
 
 ## Stack
 
@@ -25,6 +26,7 @@ Plateforme de gestion des demandes de documents administratifs étudiants : port
 | Base | PostgreSQL 17 |
 | Queue | Celery + Redis (envoi des emails) |
 | Stockage | S3-compatible (SeaweedFS en local) |
+| Antivirus | ClamAV (clamd, analyse INSTREAM par le worker) |
 | Mail (dev) | Mailpit |
 
 ## Démarrage
@@ -43,6 +45,8 @@ docker compose up -d --build --wait
 
 Au démarrage, les migrations puis le seed (catalogue et comptes de démonstration) s'exécutent automatiquement.
 
+L'image ClamAV embarque une base de signatures et `freshclam` la met à jour au démarrage (volume `clamavdb`) ; compter une à quelques minutes selon le réseau. Le worker attend que ClamAV soit prêt ; l'API, elle, démarre sans l'attendre (les fichiers restent alors en analyse et ne sont pas téléchargeables). ClamAV demande environ 1,5 Go de mémoire.
+
 | Service | URL |
 |---|---|
 | Application | http://localhost:3000 |
@@ -59,12 +63,42 @@ Comptes de démonstration (mot de passe = `SEED_DEMO_PASSWORD`) :
 
 Pour l'auto-inscription, utilisez une adresse `@etu.univ-demo.ma` ; le lien de confirmation arrive dans Mailpit.
 
+## Variables d'environnement (documents et antivirus)
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `MAX_UPLOAD_BYTES` | `10485760` (10 Mo) | taille maximale d'un fichier ; doit rester ≤ `CLAMAV_STREAM_MAX_BYTES` |
+| `CLAMAV_STREAM_MAX_BYTES` | `26214400` (25 Mo) | limite de flux de clamd (`StreamMaxLength`), appliquée au conteneur ClamAV |
+| `STORAGE_TENANT` | `default` | préfixe des clés de stockage (`tenants/<tenant>/…`) |
+| `CLAMAV_HOST` / `CLAMAV_PORT` | `clamav` / `3310` | démon ClamAV (fixés dans `docker-compose.yml`) |
+| `CLAMAV_TIMEOUT_SECONDS` | `60` | délai maximal d'une analyse (socket) |
+| `SCAN_QUEUE` | `documents` | file Celery des analyses |
+| `SCAN_MAX_RETRIES` / `SCAN_RETRY_BASE_SECONDS` | `5` / `10` | nouvelles tentatives si ClamAV est indisponible (délai exponentiel), puis statut `ERROR` |
+
+Les identifiants S3 (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) viennent uniquement de `.env`.
+
+Relation entre les deux limites : un fichier plus gros que `CLAMAV_STREAM_MAX_BYTES` ne pourrait jamais être analysé et finirait en `ERROR`. Le backend et le worker **refusent donc de démarrer** si `MAX_UPLOAD_BYTES > CLAMAV_STREAM_MAX_BYTES`. La même variable configure le conteneur ClamAV, ce qui garde les deux valeurs alignées. La limite de 10 Mo est aussi vérifiée dans le navigateur, comme simple confort : la vérification qui fait foi est celle du serveur.
+
+Commandes d'exploitation :
+
+```bash
+docker compose exec backend python -m app.scripts.rescan
+```
+
+Relance l'analyse des fichiers restés en `SCANNING` (le worker le fait aussi à chaque démarrage). Avec `--errors`, les fichiers en `ERROR` sont aussi réanalysés, par exemple après une panne de ClamAV.
+
 ## Tests
 
-Backend : pytest, sur les vrais services Postgres, Redis, S3 et Mailpit, avec la base isolée `<POSTGRES_DB>_test` remise à zéro à chaque exécution.
+Backend : pytest, sur les vrais services Postgres, Redis, S3, ClamAV et Mailpit, avec la base isolée `<POSTGRES_DB>_test` remise à zéro à chaque exécution. Un vrai worker Celery est démarré par la suite de tests sur une file dédiée (`test-documents-…`), que le worker de la stack ne consomme pas. Le scénario antivirus utilise uniquement le fichier de test standard EICAR, assemblé à l'exécution (aucun fichier du dépôt ne contient la signature).
 
 ```bash
 docker compose exec backend pytest -q
+```
+
+Le code du conteneur est en lecture seule : pour Ruff, désactivez le cache.
+
+```bash
+docker compose exec -e RUFF_NO_CACHE=true backend ruff check .
 ```
 
 Frontend, tests unitaires et contrôles statiques :

@@ -2,16 +2,19 @@
 
 /** Building blocks shared by the student and admin request screens. */
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   CircleDotIcon,
   DownloadIcon,
   FileIcon,
   MessageSquareIcon,
+  LoaderIcon,
   PaperclipIcon,
   SendIcon,
   ShieldAlertIcon,
+  ShieldCheckIcon,
+  ShieldXIcon,
   XIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +32,7 @@ import type {
   RequestDetail,
   RequestMessage,
   RequestStatus,
+  ScanStatus,
 } from "@/lib/api/types";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -37,6 +41,7 @@ import {
   fileProblem,
   formatBytes,
   formatDateTime,
+  scanTone,
   statusTone,
   type StatusTone,
 } from "@/lib/requests";
@@ -131,25 +136,90 @@ function DownloadButton({ basePath, doc }: { basePath: string; doc: RequestDocum
   );
 }
 
-/** File list with downloads through the authorized API endpoint (`basePath` = request API path). */
-export function DocumentList({ basePath, documents }: { basePath: string; documents: RequestDocument[] }) {
+const SCAN_ICONS: Record<ScanStatus, typeof ShieldCheckIcon> = {
+  SCANNING: LoaderIcon,
+  CLEAN: ShieldCheckIcon,
+  INFECTED: ShieldXIcon,
+  ERROR: ShieldAlertIcon,
+  NOT_SCANNED: ShieldAlertIcon,
+};
+
+/** Antivirus state of a file: never presented as accepted before the scan says CLEAN. */
+export function ScanBadge({ status }: { status: ScanStatus }) {
+  const { t } = useI18n();
+  const Icon = SCAN_ICONS[status];
+  return (
+    <Badge className={TONE_CLASSES[scanTone(status)]} data-testid="scan-status" data-status={status}>
+      <Icon className={cn(status === "SCANNING" && "animate-spin")} aria-hidden />
+      {t(`scan.${status}`)}
+    </Badge>
+  );
+}
+
+/**
+ * File list. Downloads go through the authorized API endpoint (`basePath` = request API path) and are
+ * only offered for files scanned CLEAN. `staff` shows the scanner detail; `actions` adds row buttons.
+ */
+export function DocumentList({
+  basePath,
+  documents,
+  staff = false,
+  actions,
+}: {
+  basePath: string;
+  documents: RequestDocument[];
+  staff?: boolean;
+  actions?: (doc: RequestDocument) => ReactNode;
+}) {
   const { locale, t } = useI18n();
   if (!documents.length) return <p className="text-sm text-muted-foreground">{t("requests.noDocuments")}</p>;
   return (
     <ul className="divide-y rounded-lg border" data-testid="document-list">
       {documents.map((doc) => (
-        <li key={doc.id} className="flex flex-wrap items-center gap-3 p-3" data-kind={doc.kind}>
+        <li
+          key={doc.id}
+          className="flex flex-wrap items-center gap-3 p-3"
+          data-kind={doc.kind}
+          data-scan={doc.scan_status}
+          data-testid="document-row"
+        >
           <FileIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium" dir="auto">
-              {doc.filename}
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+              <span className="truncate" dir="auto">
+                {doc.filename}
+              </span>
+              <ScanBadge status={doc.scan_status} />
             </p>
             <p className="text-xs text-muted-foreground">
               {t(`requests.kind${doc.kind}`)} · {formatBytes(doc.size_bytes, locale)} ·{" "}
               {formatDateTime(doc.created_at, locale)}
             </p>
+            {!doc.can_download && (
+              <p
+                className={cn(
+                  "mt-1 text-xs",
+                  doc.scan_status === "INFECTED" || doc.scan_status === "ERROR"
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+                )}
+                data-testid="scan-explanation"
+              >
+                {t(`scan.explain${doc.scan_status}`)}
+              </p>
+            )}
+            {staff && (doc.scan_detail || doc.original_filename) && (
+              <p className="mt-1 text-xs break-all text-muted-foreground" dir="ltr" data-testid="scan-detail">
+                {doc.scan_detail && `${t("scan.detail")}: ${doc.scan_detail}`}
+                {doc.scan_detail && doc.original_filename && " · "}
+                {doc.original_filename && `${t("scan.originalName")}: ${doc.original_filename}`}
+              </p>
+            )}
           </div>
-          <DownloadButton basePath={basePath} doc={doc} />
+          <div className="flex flex-wrap gap-2">
+            {actions?.(doc)}
+            {doc.can_download && <DownloadButton basePath={basePath} doc={doc} />}
+          </div>
         </li>
       ))}
     </ul>
@@ -160,10 +230,17 @@ export function ScanNotice() {
   const { t } = useI18n();
   return (
     <p className="flex items-start gap-2 text-xs text-muted-foreground">
-      <ShieldAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-      {t("requests.notScanned")}
+      <ShieldCheckIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+      {t("scan.notice")}
     </p>
   );
+}
+
+/** Poll while a scan is running (the worker updates the status asynchronously). */
+export const SCAN_POLL_MS = 2000;
+
+export function hasPendingScan(documents: RequestDocument[] | undefined): boolean {
+  return !!documents?.some((d) => d.scan_status === "SCANNING");
 }
 
 /** Multi-file picker with the same checks as the backend (type, size). */
@@ -256,7 +333,9 @@ export function MessageThread({
 }) {
   const { locale, t } = useI18n();
   const refresh = useInvalidate();
-  const messages = useApiQuery<RequestMessage[]>(`${basePath}/messages`);
+  const messages = useApiQuery<RequestMessage[]>(`${basePath}/messages`, undefined, {
+    refetchInterval: (data) => (hasPendingScan(data?.flatMap((m) => m.attachments)) ? SCAN_POLL_MS : false),
+  });
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -284,6 +363,7 @@ export function MessageThread({
       setBody("");
       setFiles([]);
       toast.success(t(respondMode ? "requests.responded" : "requests.messageSent"));
+      if (files.length) toast.info(t("scan.receivedScanning"));
       await refresh([`${basePath}`, ...invalidate]);
     } catch (err) {
       toast.error(errorMessage(t, err));
@@ -325,7 +405,7 @@ export function MessageThread({
                   </p>
                   {m.attachments.length > 0 && (
                     <div className="mt-2">
-                      <DocumentList basePath={basePath} documents={m.attachments} />
+                      <DocumentList basePath={basePath} documents={m.attachments} staff={side === "STAFF"} />
                     </div>
                   )}
                 </li>

@@ -7,7 +7,7 @@ from starlette.requests import Request
 
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.documents.validation import ValidatedFile, validate_upload
+from app.documents.validation import ValidatedFile, validate_stream
 
 MAX_TEXT_FIELD_BYTES = 64 * 1024
 
@@ -18,13 +18,13 @@ class ParsedForm:
     # (form field name, validated file)
     files: list[tuple[str, ValidatedFile]] = field(default_factory=list)
 
-
-async def _read_limited(upload: UploadFile, max_bytes: int) -> bytes:
-    data = await upload.read(max_bytes + 1)  # one extra byte detects oversize without reading it all
-    return data
+    def close(self) -> None:
+        for _, file in self.files:
+            file.close()
 
 
 async def parse_multipart(request: Request, settings: Settings) -> ParsedForm:
+    """Parses and validates every file (streamed, hashed) before any of them is stored."""
     content_type = request.headers.get("content-type", "")
     if not content_type.startswith("multipart/form-data"):
         raise AppError.of(415, "unsupported_media_type", "Expected multipart/form-data")
@@ -34,10 +34,19 @@ async def parse_multipart(request: Request, settings: Settings) -> ParsedForm:
     try:
         for name, value in form.multi_items():
             if isinstance(value, UploadFile):
-                data = await _read_limited(value, settings.max_upload_bytes)
-                parsed.files.append((name, validate_upload(value.filename, data, settings.max_upload_bytes)))
+                parsed.files.append(
+                    (
+                        name,
+                        validate_stream(
+                            value.filename, value.file, settings.max_upload_bytes, value.content_type
+                        ),
+                    )
+                )
             else:
                 parsed.fields[name] = value
+    except BaseException:
+        parsed.close()
+        raise
     finally:
         await form.close()
     return parsed

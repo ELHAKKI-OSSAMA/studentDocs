@@ -12,9 +12,8 @@ from app.audit.service import record
 from app.auth.dependencies import CurrentUser
 from app.auth.permissions import Perm
 from app.core.errors import AppError, ConflictError, NotFoundError, PermissionDeniedError
-from app.documents.models import Document, DocumentKind
-from app.documents.service import PendingUploads
-from app.documents.storage import ObjectStorage
+from app.documents.models import Document, DocumentKind, ScanStatus
+from app.documents.service import DocumentPipeline, audit_upload, find_document, soft_delete
 from app.documents.validation import ValidatedFile
 from app.messages.models import AuthorSide, MessageKind, RequestMessage
 from app.notifications.service import NotificationService, NotificationType
@@ -41,9 +40,9 @@ def _clean_body(body: str | None, *, required: bool) -> str | None:
 
 
 class RequestActions:
-    def __init__(self, db: AsyncSession, storage: ObjectStorage | None = None) -> None:
+    def __init__(self, db: AsyncSession, documents: DocumentPipeline | None = None) -> None:
         self.db = db
-        self.storage = storage
+        self.documents = documents
         self.notifications = NotificationService(db)
 
     async def _lock(self, request_id: uuid.UUID) -> Request:
@@ -70,7 +69,21 @@ class RequestActions:
         issued = await self.db.scalar(
             select(func.count())
             .select_from(Document)
-            .where(Document.request_id == request.id, Document.kind == DocumentKind.ISSUED)
+            .where(
+                Document.request_id == request.id,
+                Document.kind == DocumentKind.ISSUED,
+                Document.deleted_at.is_(None),
+            )
+        )
+        clean = await self.db.scalar(
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.request_id == request.id,
+                Document.kind == DocumentKind.ISSUED,
+                Document.deleted_at.is_(None),
+                Document.scan_status == ScanStatus.CLEAN,
+            )
         )
         has_digital = DeliveryMode.DIGITAL in modes
         has_pickup = DeliveryMode.PICKUP in modes
@@ -79,13 +92,22 @@ class RequestActions:
                 raise AppError.of(
                     422, "delivery_mode_mismatch", "Some documents must be picked up: use READY_FOR_PICKUP"
                 )
-            if not issued:
-                raise AppError.of(422, "issued_document_required", "Upload the final document first")
+            self._require_clean_issued(issued, clean)
         if target == RequestStatus.READY_FOR_PICKUP:
             if not has_pickup:
                 raise AppError.of(422, "delivery_mode_mismatch", "Digital documents: use DOCUMENT_AVAILABLE")
-            if has_digital and not issued:
-                raise AppError.of(422, "issued_document_required", "Upload the final document first")
+            if has_digital:
+                self._require_clean_issued(issued, clean)
+
+    @staticmethod
+    def _require_clean_issued(issued: int, clean: int) -> None:
+        if not issued:
+            raise AppError.of(422, "issued_document_required", "Upload the final document first")
+        if not clean:
+            # The final document must have passed the antivirus before the student can get it.
+            raise AppError.of(
+                422, "issued_document_not_clean", "The final document has not been scanned clean yet"
+            )
 
     def _apply(
         self,
@@ -214,7 +236,7 @@ class RequestActions:
         request = await self._lock(request_id)
         if request.status not in UPLOAD_ISSUED_STATUSES:
             raise TransitionNotAllowedError("Final documents can be uploaded while PROCESSING or APPROVED")
-        uploads = PendingUploads(self.storage)
+        uploads = self.documents.uploads()
         try:
             docs = []
             for file in files:
@@ -222,15 +244,7 @@ class RequestActions:
                     self.db, file, request_id=request.id, kind=DocumentKind.ISSUED, uploaded_by=current.id
                 )
                 await self.db.flush()
-                record(
-                    self.db,
-                    actor_id=current.id,
-                    action="DOCUMENT_UPLOADED",
-                    entity="document",
-                    entity_id=doc.id,
-                    ip=ip,
-                    details={"request_id": str(request.id), "kind": "ISSUED"},
-                )
+                audit_upload(self.db, doc, actor_id=current.id, ip=ip)
                 docs.append(doc)
             request.updated_at = datetime.now(UTC)
             await self._commit()
@@ -238,7 +252,52 @@ class RequestActions:
             await self.db.rollback()
             await uploads.rollback()
             raise
+        # Same antivirus pipeline as student files: an issued document is not trusted either.
+        uploads.dispatch()
         return docs
+
+    async def delete_issued(
+        self, request_id: uuid.UUID, document_id: uuid.UUID, current: CurrentUser, ip: str | None
+    ) -> None:
+        """Removes a final document before delivery (to replace it, e.g. after an INFECTED/ERROR scan)."""
+        request = await self._lock(request_id)
+        doc = await find_document(self.db, request.id, document_id)
+        if doc is None or doc.kind != DocumentKind.ISSUED:
+            raise NotFoundError("Document not found")
+        if request.status not in UPLOAD_ISSUED_STATUSES:
+            raise TransitionNotAllowedError(
+                "Final documents can only be replaced while PROCESSING or APPROVED"
+            )
+        key = soft_delete(self.db, doc, actor_id=current.id, ip=ip)
+        request.updated_at = datetime.now(UTC)
+        await self._commit()
+        await self.documents.storage.delete_quietly([key])
+
+    async def rescan(
+        self, request_id: uuid.UUID, document_id: uuid.UUID, current: CurrentUser, ip: str | None
+    ) -> Document:
+        """Queues a new scan for a document whose scan failed (ERROR), e.g. after a ClamAV outage."""
+        await self._lock(request_id)
+        doc = await find_document(self.db, request_id, document_id)
+        if doc is None:
+            raise NotFoundError("Document not found")
+        if doc.scan_status != ScanStatus.ERROR:
+            raise AppError.of(409, "rescan_not_allowed", "Only a document whose scan failed can be rescanned")
+        doc.scan_status = ScanStatus.SCANNING
+        doc.scan_detail = None
+        record(
+            self.db,
+            actor_id=current.id,
+            action="DOCUMENT_RESCAN_REQUESTED",
+            entity="document",
+            entity_id=doc.id,
+            ip=ip,
+            details={"request_id": str(request_id)},
+        )
+        await self._commit()
+        if self.documents.queue is not None:
+            self.documents.queue.enqueue([doc.id])
+        return doc
 
     # --- student --------------------------------------------------------------------------------------
 
@@ -292,7 +351,7 @@ class RequestActions:
 
         kind = MessageKind.INFORMATION_RESPONSE if respond else MessageKind.MESSAGE
         message = self._message(request, current.user, side, text, kind)
-        uploads = PendingUploads(self.storage)
+        uploads = self.documents.uploads()
         try:
             await self.db.flush()
             for file in files:
@@ -305,15 +364,7 @@ class RequestActions:
                     message_id=message.id,
                 )
                 await self.db.flush()
-                record(
-                    self.db,
-                    actor_id=current.id,
-                    action="DOCUMENT_UPLOADED",
-                    entity="document",
-                    entity_id=doc.id,
-                    ip=ip,
-                    details={"request_id": str(request.id), "kind": "MESSAGE"},
-                )
+                audit_upload(self.db, doc, actor_id=current.id, ip=ip)
             record(
                 self.db,
                 actor_id=current.id,
@@ -346,6 +397,7 @@ class RequestActions:
             await self.db.rollback()
             await uploads.rollback()
             raise
+        uploads.dispatch()
         return message
 
     async def mark_messages_read(self, request_id: uuid.UUID, reader_side: AuthorSide) -> None:

@@ -6,15 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from pydantic import ValidationError
-from sqlalchemy import select
 
 from app.auth.dependencies import CurrentUser, Requires
 from app.auth.permissions import Perm
 from app.core.crud import Page, PageParams
-from app.core.deps import ClientIp, DbSession, RateLimiterDep, SettingsDep, StorageDep
+from app.core.deps import ClientIp, DbSession, DocumentsDep, RateLimiterDep, SettingsDep, StorageDep
 from app.core.errors import AppError
-from app.documents.models import Document
-from app.documents.service import download_response
+from app.documents.service import download_response, find_document
 from app.documents.upload import parse_multipart
 from app.messages.models import AuthorSide
 from app.messages.service import thread
@@ -53,7 +51,7 @@ async def create_request(
     request: Request,
     db: DbSession,
     settings: SettingsDep,
-    storage: StorageDep,
+    documents: DocumentsDep,
     limiter: RateLimiterDep,
     current: Creator,
     ip: ClientIp,
@@ -73,7 +71,7 @@ async def create_request(
     except ValidationError as exc:
         raise _validation_error(exc) from exc
     service = RequestService(db)
-    created = await service.create(await _student(db, current), data, form, storage, ip=ip)
+    created = await service.create(await _student(db, current), data, form, documents, ip=ip)
     return await service.detail(created, current, staff=False)
 
 
@@ -106,7 +104,7 @@ async def my_issued_documents(db: DbSession, current: Owner):
     rows = await RequestService(db).issued_documents_for_student((await _student(db, current)).id)
     return [
         IssuedDocumentOut(
-            **DocumentOut.model_validate(doc).model_dump(), request_id=req.id, reference=req.reference
+            **DocumentOut.of(doc, staff=False).model_dump(), request_id=req.id, reference=req.reference
         )
         for doc, req in rows
     ]
@@ -133,13 +131,13 @@ async def my_messages(request_id: uuid.UUID, db: DbSession, current: Owner):
     return await thread(db, request_id, AuthorSide.STUDENT)
 
 
-async def _post(request_id, request, db, settings, storage, current, ip, *, respond: bool) -> MessageOut:
+async def _post(request_id, request, db, settings, documents, current, ip, *, respond: bool) -> MessageOut:
     student = await _student(db, current)
     form = await parse_multipart(request, settings)
     files = [f for name, f in form.files if name == "files"]
     if len(files) != len(form.files):
         raise AppError.of(422, "unexpected_file", "Files must be sent in the `files` field")
-    await RequestActions(db, storage).post_message(
+    await RequestActions(db, documents).post_message(
         request_id,
         form.fields.get("body"),
         files,
@@ -159,12 +157,12 @@ async def post_my_message(
     request: Request,
     db: DbSession,
     settings: SettingsDep,
-    storage: StorageDep,
+    documents: DocumentsDep,
     current: Owner,
     ip: ClientIp,
 ):
     """multipart/form-data: `body` + optional `files`."""
-    return await _post(request_id, request, db, settings, storage, current, ip, respond=False)
+    return await _post(request_id, request, db, settings, documents, current, ip, respond=False)
 
 
 @router.post("/{request_id}/respond", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
@@ -173,7 +171,7 @@ async def respond_to_information_request(
     request: Request,
     db: DbSession,
     settings: SettingsDep,
-    storage: StorageDep,
+    documents: DocumentsDep,
     current: Owner,
     ip: ClientIp,
 ):
@@ -181,7 +179,7 @@ async def respond_to_information_request(
 
     multipart/form-data: `body` + optional `files`.
     """
-    return await _post(request_id, request, db, settings, storage, current, ip, respond=True)
+    return await _post(request_id, request, db, settings, documents, current, ip, respond=True)
 
 
 @router.post("/{request_id}/messages/read", status_code=status.HTTP_204_NO_CONTENT)
@@ -202,7 +200,7 @@ async def download_my_document(
 ) -> Response:
     service = RequestService(db)
     req = await service.get_for_student(request_id, (await _student(db, current)).id)
-    doc = await db.scalar(select(Document).where(Document.id == document_id, Document.request_id == req.id))
+    doc = await find_document(db, req.id, document_id)
     # Issued documents stay hidden until the request reaches an "available" status.
     if doc is not None and not visible_documents([doc], req, staff=False):
         doc = None

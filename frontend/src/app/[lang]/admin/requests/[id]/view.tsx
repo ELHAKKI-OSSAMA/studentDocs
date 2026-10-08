@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ArrowLeftIcon, UploadIcon } from "lucide-react";
+import { ArrowLeftIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -12,6 +12,8 @@ import { ADMIN_REQUEST_LISTS, RequestActions } from "@/components/request-action
 import {
   DocumentList,
   EnrollmentBadge,
+  hasPendingScan,
+  SCAN_POLL_MS,
   FilePicker,
   MessageThread,
   RequestInfo,
@@ -21,8 +23,8 @@ import {
 } from "@/components/requests";
 import { useI18n } from "@/i18n/client";
 import { api, ApiError } from "@/lib/api/client";
-import { useApiQuery, useInvalidate } from "@/lib/api/hooks";
-import type { PersonRef, RequestDetail } from "@/lib/api/types";
+import { useApiQuery, useHasPermission, useInvalidate } from "@/lib/api/hooks";
+import type { PersonRef, RequestDetail, RequestDocument } from "@/lib/api/types";
 import { errorMessage } from "@/lib/errors";
 import { isUuid } from "@/lib/requests";
 
@@ -108,7 +110,8 @@ function UploadIssued({ request }: { request: RequestDetail }) {
     try {
       await api(`/admin/requests/${request.id}/documents`, { method: "POST", body: form });
       setFiles([]);
-      toast.success(t("requests.uploaded"));
+      // Received, not accepted: the file is usable once the antivirus says CLEAN.
+      toast.success(t("scan.receivedScanning"));
       await refresh(LISTS);
     } catch (err) {
       toast.error(errorMessage(t, err));
@@ -132,10 +135,65 @@ function UploadIssued({ request }: { request: RequestDetail }) {
   );
 }
 
+/** Rescan a file whose scan failed; remove a final document (to replace it) before delivery. */
+function DocumentActions({ request, doc }: { request: RequestDetail; doc: RequestDocument }) {
+  const { t } = useI18n();
+  const refresh = useInvalidate();
+  const canProcess = useHasPermission("requests.process");
+  const [busy, setBusy] = useState(false);
+  const base = `/admin/requests/${request.id}/documents/${doc.id}`;
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    setBusy(true);
+    try {
+      await action();
+      toast.success(success);
+      await refresh(LISTS);
+    } catch (err) {
+      toast.error(errorMessage(t, err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      {canProcess && doc.scan_status === "ERROR" && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          data-testid="rescan-document"
+          onClick={() => run(() => api(`${base}/rescan`, { method: "POST" }), t("scan.rescanQueued"))}
+        >
+          <RefreshCwIcon />
+          {t("scan.rescan")}
+        </Button>
+      )}
+      {request.can_upload_document && doc.kind === "ISSUED" && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          data-testid="delete-document"
+          onClick={() => run(() => api(base, { method: "DELETE" }), t("scan.deleted"))}
+        >
+          <Trash2Icon />
+          {t("scan.replace")}
+        </Button>
+      )}
+    </>
+  );
+}
+
 export function RequestView({ id }: { id: string }) {
   const { locale, t } = useI18n();
   const valid = isUuid(id);
-  const request = useApiQuery<RequestDetail>(`/admin/requests/${id}`, undefined, { enabled: valid });
+  const request = useApiQuery<RequestDetail>(`/admin/requests/${id}`, undefined, {
+    enabled: valid,
+    // The worker updates scan results asynchronously: poll only while a file is being scanned.
+    refetchInterval: (data) => (hasPendingScan(data?.documents) ? SCAN_POLL_MS : false),
+  });
   const error = valid ? request.error : new ApiError(404, "not_found", "");
   const data = request.data;
   const basePath = `/admin/requests/${id}`;
@@ -188,7 +246,12 @@ export function RequestView({ id }: { id: string }) {
                     <CardTitle>{t("requests.documents")}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <DocumentList basePath={basePath} documents={data.documents.filter((d) => d.kind !== "MESSAGE")} />
+                    <DocumentList
+                      basePath={basePath}
+                      documents={data.documents.filter((d) => d.kind !== "MESSAGE")}
+                      staff
+                      actions={(doc) => <DocumentActions request={data} doc={doc} />}
+                    />
                     {data.can_upload_document && <UploadIssued request={data} />}
                     <ScanNotice />
                   </CardContent>

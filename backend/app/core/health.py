@@ -29,6 +29,12 @@ async def check_storage(s3: BaseClient, bucket: str) -> bool:
     return True
 
 
+async def check_antivirus(host: str, port: int) -> bool:
+    from app.documents.scanner import ClamdScanner
+
+    return await asyncio.to_thread(ClamdScanner(host, port, timeout=CHECK_TIMEOUT_SECONDS).ping)
+
+
 async def _run(name: str, coro) -> tuple[str, bool]:
     try:
         return name, bool(await asyncio.wait_for(coro, CHECK_TIMEOUT_SECONDS))
@@ -51,6 +57,8 @@ async def ready(request: Request) -> JSONResponse:
             _run("database", check_database(state.engine)),
             _run("redis", check_redis(state.redis)),
             _run("storage", check_storage(state.s3, state.settings.s3_bucket)),
+            # Uploads keep working without ClamAV (files wait in SCANNING), but the system is degraded.
+            _run("antivirus", check_antivirus(state.settings.clamav_host, state.settings.clamav_port)),
         )
     )
     healthy = all(results.values())

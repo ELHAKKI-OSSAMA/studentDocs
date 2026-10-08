@@ -90,15 +90,47 @@ class ItemOut(_Ref):
 
 
 class DocumentOut(_Ref):
+    """File metadata. The storage key is never part of any response."""
+
     id: uuid.UUID
     kind: DocumentKind
     filename: str
     mime_type: str
     size_bytes: int
+    sha256: str
     scan_status: ScanStatus
+    # Reason code for INFECTED / ERROR (virus_detected, scanner_unavailable, file_missing, …).
+    scan_reason: str | None = None
+    scanned_at: datetime | None
+    # Only a CLEAN file can be downloaded.
+    can_download: bool
     request_item_id: uuid.UUID | None
     message_id: uuid.UUID | None
     created_at: datetime
+    # Staff only: name as uploaded and full scanner detail (signature name).
+    original_filename: str | None = None
+    scan_detail: str | None = None
+
+    @classmethod
+    def of(cls, doc, *, staff: bool) -> "DocumentOut":
+        detail = doc.scan_detail
+        return cls(
+            id=doc.id,
+            kind=doc.kind,
+            filename=doc.filename,
+            mime_type=doc.mime_type,
+            size_bytes=doc.size_bytes,
+            sha256=doc.sha256,
+            scan_status=doc.scan_status,
+            scan_reason=detail.split(":", 1)[0] if detail else None,
+            scanned_at=doc.scanned_at,
+            can_download=doc.downloadable,
+            request_item_id=doc.request_item_id,
+            message_id=doc.message_id,
+            created_at=doc.created_at,
+            original_filename=doc.original_filename if staff else None,
+            scan_detail=detail if staff else None,
+        )
 
 
 class HistoryOut(_Ref):

@@ -99,6 +99,11 @@ function Confirmation({ request }: { request: RequestDetail }) {
           {request.reference}
         </p>
         <p className="text-sm text-muted-foreground">{t("requests.createdHint")}</p>
+        {request.documents.length > 0 && (
+          <p className="text-sm text-muted-foreground" data-testid="scan-pending-notice">
+            {t("scan.receivedScanning")}
+          </p>
+        )}
         <div className="flex flex-wrap justify-center gap-2">
           <Link href={`/${locale}/student/requests/${request.id}`} className={buttonVariants()}>
             {t("requests.viewRequest")}

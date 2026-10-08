@@ -12,10 +12,9 @@ from sqlalchemy import select
 from app.auth.dependencies import Requires
 from app.auth.permissions import Perm
 from app.core.crud import Page, PageParams
-from app.core.deps import ClientIp, DbSession, SettingsDep, StorageDep
+from app.core.deps import ClientIp, DbSession, DocumentsDep, SettingsDep, StorageDep
 from app.core.errors import AppError
-from app.documents.models import Document
-from app.documents.service import download_response
+from app.documents.service import download_response, find_document
 from app.documents.upload import parse_multipart
 from app.messages.models import AuthorSide
 from app.messages.service import thread
@@ -116,17 +115,20 @@ async def upload_issued_documents(
     request: Request,
     db: DbSession,
     settings: SettingsDep,
-    storage: StorageDep,
+    documents: DocumentsDep,
     current: Processor,
     ip: ClientIp,
 ):
-    """multipart/form-data: final document(s) in the `files` field (PDF / PNG / JPEG)."""
+    """multipart/form-data: final document(s) in the `files` field (PDF / PNG / JPEG).
+
+    The files go through the same antivirus pipeline as student files (status SCANNING first).
+    """
     form = await parse_multipart(request, settings)
     files = [f for name, f in form.files if name == "files"]
     if len(files) != len(form.files):
         raise AppError.of(422, "unexpected_file", "Files must be sent in the `files` field")
-    docs = await RequestActions(db, storage).upload_issued(request_id, files, current, ip)
-    return [DocumentOut.model_validate(d) for d in docs]
+    docs = await RequestActions(db, documents).upload_issued(request_id, files, current, ip)
+    return [DocumentOut.of(d, staff=True) for d in docs]
 
 
 @router.get("/{request_id}/messages", response_model=list[MessageOut])
@@ -141,7 +143,7 @@ async def post_message(
     request: Request,
     db: DbSession,
     settings: SettingsDep,
-    storage: StorageDep,
+    documents: DocumentsDep,
     current: Processor,
     ip: ClientIp,
 ):
@@ -150,7 +152,7 @@ async def post_message(
     files = [f for name, f in form.files if name == "files"]
     if len(files) != len(form.files):
         raise AppError.of(422, "unexpected_file", "Files must be sent in the `files` field")
-    await RequestActions(db, storage).post_message(
+    await RequestActions(db, documents).post_message(
         request_id,
         form.fields.get("body"),
         files,
@@ -179,7 +181,33 @@ async def download_document(
     current: Reader,
     ip: ClientIp,
 ) -> Response:
-    doc = await db.scalar(
-        select(Document).where(Document.id == document_id, Document.request_id == request_id)
-    )
+    doc = await find_document(db, request_id, document_id)
     return await download_response(db, storage, doc, actor_id=current.id, ip=ip)
+
+
+@router.delete("/{request_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_issued_document(
+    request_id: uuid.UUID,
+    document_id: uuid.UUID,
+    db: DbSession,
+    documents: DocumentsDep,
+    current: Processor,
+    ip: ClientIp,
+) -> Response:
+    """Removes a final document before delivery (PROCESSING / APPROVED), e.g. to replace it."""
+    await RequestActions(db, documents).delete_issued(request_id, document_id, current, ip)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{request_id}/documents/{document_id}/rescan", response_model=DocumentOut)
+async def rescan_document(
+    request_id: uuid.UUID,
+    document_id: uuid.UUID,
+    db: DbSession,
+    documents: DocumentsDep,
+    current: Processor,
+    ip: ClientIp,
+):
+    """Queues a new antivirus scan for a document whose scan ended in ERROR."""
+    doc = await RequestActions(db, documents).rescan(request_id, document_id, current, ip)
+    return DocumentOut.of(doc, staff=True)

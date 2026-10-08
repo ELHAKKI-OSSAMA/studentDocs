@@ -69,6 +69,10 @@ describe("validateDraft", () => {
   it("checks the attached file type", () => {
     const exe = new File(["MZ"], "virus.exe", { type: "application/x-msdownload" });
     expect(validateDraft({ enrollmentId: "e1", selection: { convention: { quantity: 1, file: exe } } }, TYPES)).toEqual([
+      "errors.file_name_not_allowed",
+    ]);
+    const txt = new File(["hello"], "notes.txt", { type: "text/plain" });
+    expect(validateDraft({ enrollmentId: "e1", selection: { convention: { quantity: 1, file: txt } } }, TYPES)).toEqual([
       "errors.file_type_not_allowed",
     ]);
   });
@@ -85,7 +89,17 @@ describe("fileProblem", () => {
     expect(fileProblem(new File([], "empty.pdf", { type: "application/pdf" }))).toBe("errors.file_empty");
     const big = new File([new Uint8Array(MAX_UPLOAD_BYTES + 1)], "big.pdf", { type: "application/pdf" });
     expect(fileProblem(big)).toBe("errors.file_too_large");
-    expect(fileProblem(new File(["<x/>"], "a.svg", { type: "image/svg+xml" }))).toBe("errors.file_type_not_allowed");
+    expect(fileProblem(new File(["<x/>"], "a.svg", { type: "image/svg+xml" }))).toBe("errors.file_name_not_allowed");
+    expect(fileProblem(new File(["x"], "doc", { type: "" }))).toBe("errors.file_type_not_allowed");
+  });
+
+  it("rejects misleading names and declared types (the server re-checks the content anyway)", () => {
+    expect(fileProblem(new File(["x"], "facture.exe.pdf", { type: "application/pdf" }))).toBe(
+      "errors.file_name_not_allowed",
+    );
+    expect(fileProblem(new File(["x"], "photo.png", { type: "application/pdf" }))).toBe("errors.file_mime_mismatch");
+    expect(fileProblem(new File(["x"], "scan.JPEG", { type: "image/jpeg" }))).toBeNull();
+    expect(fileProblem(new File(["x"], "scan.pdf", { type: "" }))).toBeNull();
   });
 });
 

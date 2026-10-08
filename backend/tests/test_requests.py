@@ -21,6 +21,7 @@ from tests.factories import (
     multipart,
     submit,
     transition,
+    wait_scanned,
 )
 
 
@@ -59,7 +60,13 @@ async def test_create_request_with_supporting_document(setup):
     assert body["can_cancel"] and not body["can_respond"] and body["available_transitions"] == []
     [doc] = body["documents"]
     assert doc["kind"] == "ATTACHMENT" and doc["filename"] == "convention_signée.pdf"
-    assert doc["scan_status"] == "NOT_SCANNED"  # no antivirus yet — never claimed otherwise
+    # Received, not accepted: the file is unavailable until the antivirus says CLEAN.
+    assert doc["scan_status"] == "SCANNING" and doc["can_download"] is False
+    assert "storage_key" not in str(body)
+
+    detail = await wait_scanned(student, f"/api/v1/requests/{body['id']}")
+    [doc] = detail["documents"]
+    assert doc["scan_status"] == "CLEAN" and doc["can_download"] is True
 
     # The file really is in object storage and comes back byte-for-byte to its owner.
     res = await student.get(f"/api/v1/requests/{body['id']}/documents/{doc['id']}/download")
@@ -265,6 +272,8 @@ async def test_full_digital_workflow(setup):
     hidden = await student.get(f"/api/v1/requests/{rid}/documents/{issued_id}/download")
     assert hidden.status_code == 404
 
+    # The final document goes through the antivirus too: it cannot be made available before CLEAN.
+    await wait_scanned(admin, f"/api/v1/admin/requests/{rid}")
     assert (await transition(admin, rid, "DOCUMENT_AVAILABLE")).json()["status"] == "DOCUMENT_AVAILABLE"
     res = await student.get(f"/api/v1/requests/{rid}/documents/{issued_id}/download")
     assert res.status_code == 200 and res.content == PDF

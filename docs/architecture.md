@@ -39,14 +39,14 @@ Admin (écran AI Review) ─▶ identifie l'étudiant, corrige, confirme ─▶ 
 | `students` | profils étudiants, inscriptions par année, vérification des inscriptions |
 | `academic` | années, catégories, branches, types de documents |
 | `requests` | agrégat Request, machine d'état (`workflow.py`), actions (`actions.py`), numérotation |
-| `documents` | métadonnées des fichiers, upload validé (`validation.py`), stockage S3 (`storage.py`), téléchargement autorisé |
+| `documents` | validation (`validation.py`), stockage S3 privé (`storage.py`), antivirus (`scanner.py`, `scanning.py`), téléchargement autorisé (`service.py`) |
 | `messages` | fil de messages par demande |
 | `email` | `EmailProvider` (IMAP d'abord), ingestion, `EmailCase` |
 | `ai` | `LLMProvider` (Claude, OpenAI-compatible, Ollama), prompts versionnés, pipeline |
 | `notifications` | `NotificationService` (in-app en Phase 2 ; canal email en Phase 5) |
 | `audit` | journal append-only |
 | `admin` | dashboard et statistiques |
-| `worker` | application Celery et tâches |
+| `worker` | application Celery, tâches (`mail.send`, `documents.scan`), contexte (`context.py`) |
 
 Chaque module suit `models.py`, `schemas.py`, `repository.py`, `service(s)`, `router.py`.
 
@@ -138,13 +138,68 @@ Déclarées par l'étudiant (`PENDING`, source `SELF_DECLARED`), puis vérifiée
 
 Manuelle uniquement (`requests.assign`) : l'assigné doit être un utilisateur actif dont le rôle a `requests.process`. `assigned_to_id` et le filtre `assigned=me|unassigned|<id>` préparent une attribution automatique ultérieure.
 
-## Fichiers (Phase 2, implémenté)
+## Fichiers (Phase 3, implémenté)
 
-- **Validation** : type réel détecté sur le contenu (signatures PDF, PNG, JPEG ; l'extension et le `Content-Type` envoyés ne sont pas crus), 10 Mo maximum, 10 fichiers par envoi, nom affiché nettoyé (`safe_filename`). Empreinte SHA-256 conservée.
-- **Stockage** : bucket S3 privé, clé aléatoire. `storage_key` n'est jamais exposé par l'API.
-- **Téléchargement** : uniquement par l'API, après contrôle (propriétaire ou `requests.read`, et le document doit appartenir à la demande indiquée). La réponse est diffusée par le backend avec `Content-Disposition`, `Cache-Control: private, no-store` et `X-Content-Type-Options: nosniff`, et chaque téléchargement est audité (`DOCUMENT_DOWNLOADED`). Pas d'URL présignée à ce stade.
+### Cycle de vie d'un document
+
+```
+upload (multipart)
+  → validation stricte (avant tout stockage)          refus 422, rien n'est stocké
+  → copie en flux dans un fichier temporaire + SHA-256
+  → stockage S3 privé, clé non devinable
+  → ligne `documents` : scan_status = SCANNING          transaction commitée
+  → tâche Celery `documents.scan` (file `documents`)    envoyée APRÈS le commit
+  → ClamAV (INSTREAM)
+        ├─ OK                → CLEAN      téléchargeable
+        ├─ <signature> FOUND → INFECTED   objet déplacé en quarantaine, jamais servi
+        └─ panne / erreur    → nouvelles tentatives, puis ERROR (jamais servi, réanalysable)
+```
+
+Le même pipeline sert pour les trois sources de fichiers : pièces justificatives de l'étudiant, pièces jointes de messages (des deux côtés) et documents finaux déposés par l'administration. Aucun fichier, même déposé par un admin, ne contourne l'antivirus.
+
+### Validation (`documents/validation.py`)
+
+- Taille maximale configurable (`MAX_UPLOAD_BYTES`), mesurée pendant la copie : un fichier trop gros est rejeté sans être lu en entier.
+- Type réel détecté par les *magic bytes* : PDF, PNG ou JPEG uniquement. Un exécutable renommé `document.pdf` est refusé (`file_type_not_allowed`).
+- L'extension du nom doit correspondre au contenu (`file_extension_mismatch`), et le type MIME déclaré par le navigateur, s'il est informatif, aussi (`file_mime_mismatch`). Le `Content-Type` du client n'est jamais utilisé comme vérité.
+- Extensions dangereuses refusées partout dans le nom, par exemple `facture.exe.pdf` (`file_name_not_allowed`).
+- Nom affiché normalisé (`safe_filename` : sans chemin, sans caractères de contrôle ni d'inversion de sens, 100 caractères). Le nom d'origine nettoyé est conservé pour le personnel (`original_filename`), jamais utilisé comme clé.
+
+### Stockage privé (`documents/storage.py`)
+
+- Bucket privé : aucun accès anonyme (vérifié par test sur le vrai SeaweedFS).
+- Clés : `tenants/<tenant>/requests/<request_id>/<uuid aléatoire>`. Elles ne contiennent jamais le nom du fichier. Le préfixe `tenants/<tenant>` (`STORAGE_TENANT`) prépare le multi-tenant sans l'implémenter.
+- Quarantaine : `quarantine/tenants/…`, après détection.
+- `storage_key` n'apparaît dans aucune réponse de l'API.
+- Envoi en flux (`upload_fileobj`, multipart S3 pour les gros fichiers), lecture en morceaux de 64 Ko pour l'analyse comme pour le téléchargement : le fichier n'est jamais chargé en entier en mémoire.
+
+### Antivirus (`documents/scanner.py`, `documents/scanning.py`, `worker/tasks.py`)
+
+- `ClamdScanner` parle directement au démon ClamAV (protocole INSTREAM sur TCP, sans dépendance). Seule une réponse explicite `OK` donne CLEAN. `… FOUND` donne INFECTED (la signature est conservée pour le personnel). Toute autre réponse, par exemple une limite de taille dépassée, est une erreur.
+- **Idempotence** : la tâche verrouille la ligne (`SELECT … FOR UPDATE SKIP LOCKED`) et ne traite qu'un document encore `SCANNING`. Une tâche exécutée deux fois, ou en parallèle, ne fait rien (`SKIPPED`). Le résultat, l'audit et la notification sont écrits dans une seule transaction.
+- **Redémarrage du worker** : `acks_late` et `reject_on_worker_lost` font rejouer une tâche interrompue (le document est resté `SCANNING`, la transaction ayant été annulée). Au démarrage, le worker remet aussi en file tous les documents `SCANNING` (message perdu, Redis indisponible au moment de l'envoi).
+- **Panne de ClamAV** (connexion refusée, délai dépassé) : la tâche est rejouée avec un délai exponentiel (`SCAN_MAX_RETRIES`, `SCAN_RETRY_BASE_SECONDS`), puis le document passe en `ERROR / scanner_unavailable`. Pendant ce temps, l'API continue d'accepter les dépôts, mais aucun fichier n'est téléchargeable. Un admin peut relancer l'analyse d'un fichier en `ERROR` ; `python -m app.scripts.rescan --errors` le fait en masse.
+- **Objet introuvable** : `ERROR / file_missing`. **Exception imprévue** : `ERROR / scan_failed`. Une exception ne rend jamais un fichier disponible (*fail closed*).
+- **Garde métier** : DOCUMENT_AVAILABLE, ainsi que READY_FOR_PICKUP lorsqu'il y a des documents numériques, exige un document final CLEAN (`issued_document_not_clean`). Un document final INFECTED ou en ERROR peut être supprimé (suppression logique, objet effacé, audit conservé) puis remplacé tant que la demande est en PROCESSING ou APPROVED.
+- **Notifications in-app** à l'auteur du dépôt : `DOCUMENT_INFECTED`, `DOCUMENT_SCAN_FAILED`.
+
+### Téléchargement (`documents/service.py`)
+
+Ordre des contrôles : authentification (401) → permission (403) → appartenance de la demande pour un étudiant (404, même réponse qu'une demande inexistante) → document de cette demande, non supprimé, visible (404) → `scan_status == CLEAN` (sinon `409 document_not_available`, avec `details.scan_status`). Le refus est audité (`DOCUMENT_DOWNLOAD_REFUSED`), tout comme le succès (`DOCUMENT_DOWNLOADED`). La réponse est diffusée en flux avec `Content-Disposition: attachment`, `Content-Length`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff` et `Content-Security-Policy: default-src 'none'; sandbox`. Il n'y a pas d'URL présignée.
+
+### Audit
+
+`DOCUMENT_UPLOADED` (type, taille, SHA-256), `DOCUMENT_SCANNED` (résultat, détail, tentatives, SHA-256), `DOCUMENT_DOWNLOADED`, `DOCUMENT_DOWNLOAD_REFUSED`, `DOCUMENT_DELETED`, `DOCUMENT_RESCAN_REQUESTED`. Ni le contenu des fichiers ni les clés de stockage ne sont écrits dans les journaux applicatifs.
+
+### Doublons
+
+Le SHA-256 est indexé : des fichiers identiques peuvent être retrouvés. Ils ne sont jamais supprimés automatiquement, l'historique est conservé.
+
+### Limites connues
+
+- ClamAV ne détecte que ce que ses signatures connaissent. Il n'y a pas d'analyse comportementale ni de nettoyage des PDF (JavaScript embarqué, etc.).
+- Taille maximale : `MAX_UPLOAD_BYTES` (10 Mo) doit rester ≤ `CLAMAV_STREAM_MAX_BYTES` (`StreamMaxLength` de clamd, 25 Mo, fixé sur le conteneur par la même variable). La configuration est validée au démarrage : une configuration incohérente empêche le backend et le worker de démarrer, au lieu de laisser des fichiers finir en `ERROR`.
 - **Documents délivrés** (`ISSUED`) : déposés par l'admin en PROCESSING ou APPROVED ; invisibles pour l'étudiant tant que la demande n'est pas DOCUMENT_AVAILABLE, READY_FOR_PICKUP ou COMPLETED.
-- **Antivirus** : non branché. Les fichiers sont marqués `scan_status = NOT_SCANNED`, et l'interface l'indique explicitement (prévu en Phase 3).
 
 ## Messages et notifications (Phase 2, implémenté)
 
@@ -173,4 +228,4 @@ Le `LLMProvider` déclare `is_local`. Si le fournisseur configuré est local (Ol
 
 ## Infrastructure de développement
 
-`docker compose up` démarre `postgres`, `redis`, `storage` (SeaweedFS, compatible S3), `mailpit` (SMTP de test), les tâches ponctuelles `migrate` et `storage-init`, puis `backend`, `worker` et `frontend`.
+`docker compose up` démarre `postgres`, `redis`, `storage` (SeaweedFS, compatible S3), `clamav` (antivirus), `mailpit` (SMTP de test), les tâches ponctuelles `migrate` et `storage-init`, puis `backend`, `worker` et `frontend`. Le worker consomme les files `celery` (emails) et `documents` (analyses) et attend que ClamAV soit sain. `/health/ready` inclut maintenant `antivirus`.

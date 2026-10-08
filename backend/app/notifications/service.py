@@ -17,6 +17,9 @@ class NotificationType:
     NEW_MESSAGE = "NEW_MESSAGE"
     INFORMATION_PROVIDED = "INFORMATION_PROVIDED"
     REQUEST_ASSIGNED = "REQUEST_ASSIGNED"
+    # Antivirus outcome of a file the user uploaded (in-app; email delivery comes in Phase 5).
+    DOCUMENT_INFECTED = "DOCUMENT_INFECTED"
+    DOCUMENT_SCAN_FAILED = "DOCUMENT_SCAN_FAILED"
 
 
 class NotificationService:

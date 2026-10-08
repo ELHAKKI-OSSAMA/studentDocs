@@ -31,6 +31,8 @@ TEST_DOMAIN = "test-univ.ma"
 PASSWORD = "Passw0rd-test-123"
 MAILPIT_API_URL = os.environ.get("MAILPIT_API_URL", "http://localhost:8025")
 SESSION_PREFIX = f"test:{uuid.uuid4().hex[:8]}:"
+# Dedicated Celery queue: the stack's own worker (main database) never consumes test scans.
+SCAN_QUEUE = f"test-documents-{uuid.uuid4().hex[:8]}"
 
 
 def _test_settings(**overrides) -> Settings:
@@ -47,6 +49,9 @@ def _test_settings(**overrides) -> Settings:
         # Generous defaults; brute-force tests build apps with strict limits.
         "rate_limit_login_per_ip": 1000,
         "rate_limit_register_per_ip": 1000,
+        "scan_queue": SCAN_QUEUE,
+        "scan_max_retries": 1,
+        "scan_retry_base_seconds": 1,
     }
     values.update(overrides)
     return Settings(**values)
@@ -75,6 +80,26 @@ def migrated_db(settings: Settings) -> str:
     command.downgrade(cfg, "base")  # fresh schema and data for every run
     command.upgrade(cfg, "head")
     return settings.database_url
+
+
+@pytest.fixture(scope="session", autouse=True)
+def scan_worker(settings: Settings, migrated_db: str):
+    """A real Celery worker (real Redis broker, real ClamAV, test database) consuming the test queue."""
+    from celery.contrib.testing.worker import start_worker
+
+    from app.worker import context
+    from app.worker.celery_app import celery_app
+
+    context.configure(settings)
+    with start_worker(
+        celery_app,
+        pool="threads",
+        concurrency=2,
+        perform_ping_check=False,
+        queues=[settings.scan_queue],
+        shutdown_timeout=30,
+    ) as worker:
+        yield worker
 
 
 class ReusableClient(AsyncClient):

@@ -15,8 +15,7 @@ from app.auth.permissions import Perm
 from app.core.crud import PageParams, paginate
 from app.core.errors import AppError, NotFoundError
 from app.documents.models import Document, DocumentKind
-from app.documents.service import PendingUploads, documents_of
-from app.documents.storage import ObjectStorage
+from app.documents.service import DocumentPipeline, audit_upload, documents_of
 from app.documents.upload import ParsedForm
 from app.messages.models import AuthorSide, RequestMessage
 from app.notifications.service import NotificationService, NotificationType
@@ -105,7 +104,7 @@ class RequestService:
         student: Student,
         data: RequestCreate,
         form: ParsedForm,
-        storage: ObjectStorage,
+        documents: DocumentPipeline,
         *,
         ip: str | None,
     ) -> Request:
@@ -213,7 +212,7 @@ class RequestService:
             actor_role=Actor.SYSTEM,
         )
 
-        uploads = PendingUploads(storage)
+        uploads = documents.uploads()
         try:
             item_by_type = {i.document_type_id: i for i in request.items}
             for type_id, files in files_by_type.items():
@@ -227,15 +226,7 @@ class RequestService:
                         request_item_id=item_by_type[type_id].id,
                     )
                     await self.db.flush()
-                    record(
-                        self.db,
-                        actor_id=student.user_id,
-                        action="DOCUMENT_UPLOADED",
-                        entity="document",
-                        entity_id=doc.id,
-                        ip=ip,
-                        details={"request_id": str(request.id)},
-                    )
+                    audit_upload(self.db, doc, actor_id=student.user_id, ip=ip)
             record(
                 self.db,
                 actor_id=student.user_id,
@@ -251,6 +242,8 @@ class RequestService:
             await self.db.rollback()
             await uploads.rollback()
             raise
+        # The supporting documents are received, not accepted: they become usable once scanned CLEAN.
+        uploads.dispatch()
         return await self.get(request.id)
 
     # --- queries ------------------------------------------------------------------------------------
@@ -353,6 +346,7 @@ class RequestService:
             .where(
                 Request.student_id == student_id,
                 Document.kind == DocumentKind.ISSUED,
+                Document.deleted_at.is_(None),
                 Request.status.in_(DOCUMENTS_VISIBLE_TO_STUDENT),
             )
             .order_by(Document.created_at.desc())
@@ -446,7 +440,7 @@ class RequestService:
             status_reason=request.status_reason,
             submitted_at=request.submitted_at,
             closed_at=request.closed_at,
-            documents=[DocumentOut.model_validate(d) for d in docs],
+            documents=[DocumentOut.of(d, staff=staff) for d in docs],
             history=[HistoryOut.model_validate(h) for h in history],
             available_transitions=transitions,
             can_cancel=can_cancel,

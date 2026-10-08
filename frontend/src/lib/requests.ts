@@ -3,7 +3,7 @@
  * give early feedback and build the exact payloads the API expects.
  */
 import type { TranslationKey } from "@/i18n/translate";
-import type { DocumentType, RequestStatus } from "@/lib/api/types";
+import type { DocumentType, RequestStatus, ScanStatus } from "@/lib/api/types";
 
 /** Mirrors the backend upload policy (app/core/config.py + app/documents/validation.py). */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -44,19 +44,37 @@ export function statusTone(status: RequestStatus): StatusTone {
   }
 }
 
+export function scanTone(status: ScanStatus): StatusTone {
+  if (status === "CLEAN") return "success";
+  if (status === "SCANNING") return "info";
+  if (status === "INFECTED" || status === "ERROR") return "danger";
+  return "warning";
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
 
-/** Client-side check of a file before upload; returns an `errors.*` key or null. */
+const EXTENSIONS: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" };
+const DANGEROUS = new Set(["exe", "dll", "com", "scr", "msi", "bat", "cmd", "ps1", "vbs", "js", "jar", "sh", "hta", "lnk", "html", "htm", "svg", "php"]);
+
+/**
+ * Early client-side check before upload; returns an `errors.*` key or null. Only a convenience: the
+ * backend re-checks everything from the content (magic bytes) and the antivirus scans every file.
+ */
 export function fileProblem(file: File): TranslationKey | null {
   if (file.size === 0) return "errors.file_empty";
   if (file.size > MAX_UPLOAD_BYTES) return "errors.file_too_large";
+  const parts = file.name.toLowerCase().split(".");
+  if (parts.slice(1).some((p) => DANGEROUS.has(p.trim()))) return "errors.file_name_not_allowed";
+  const expected = parts.length > 1 ? EXTENSIONS[parts[parts.length - 1]] : undefined;
+  if (!expected) return "errors.file_type_not_allowed";
   if (file.type && !(ALLOWED_MIME_TYPES as readonly string[]).includes(file.type)) {
     return "errors.file_type_not_allowed";
   }
+  if (file.type && file.type !== expected) return "errors.file_mime_mismatch";
   return null;
 }
 

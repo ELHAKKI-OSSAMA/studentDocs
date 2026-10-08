@@ -19,7 +19,7 @@ async def thread(db: AsyncSession, request_id: uuid.UUID, viewer_side: AuthorSid
     if messages:
         docs = await db.scalars(
             select(Document)
-            .where(Document.message_id.in_([m.id for m in messages]))
+            .where(Document.message_id.in_([m.id for m in messages]), Document.deleted_at.is_(None))
             .order_by(Document.created_at)
         )
         for doc in docs.all():
@@ -40,7 +40,9 @@ async def thread(db: AsyncSession, request_id: uuid.UUID, viewer_side: AuthorSid
                 body=m.body,
                 created_at=m.created_at,
                 read_at=m.read_at,
-                attachments=[DocumentOut.model_validate(d) for d in attachments[m.id]],
+                attachments=[
+                    DocumentOut.of(d, staff=viewer_side == AuthorSide.STAFF) for d in attachments[m.id]
+                ],
             )
         )
     return out

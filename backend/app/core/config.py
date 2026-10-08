@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 10 * 1024 * 1024
     max_files_per_upload: int = 10
     rate_limit_request_create_per_hour: int = 30
+    # Object keys are namespaced by tenant (single tenant for now; keeps multi-tenancy possible).
+    storage_tenant: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+    # Antivirus (ClamAV daemon, INSTREAM over TCP). Files stay unavailable until scanned CLEAN.
+    clamav_host: str = "localhost"
+    clamav_port: int = 3310
+    clamav_timeout_seconds: float = 60.0
+    # clamd StreamMaxLength (bytes). The same value configures the ClamAV container (docker-compose.yml):
+    # a file larger than this could never be scanned, so MAX_UPLOAD_BYTES must not exceed it.
+    clamav_stream_max_bytes: int = 25 * 1024 * 1024
+    # Celery queue dedicated to scans, retries while ClamAV is unreachable, then ERROR (fail closed).
+    scan_queue: str = "documents"
+    scan_max_retries: int = 5
+    scan_retry_base_seconds: int = 10
 
     # Outgoing mail
     smtp_host: str = "localhost"
@@ -60,6 +74,16 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_starttls: bool = False
     mail_from: str = "StudentDocs <no-reply@studentdocs.local>"
+
+    @model_validator(mode="after")
+    def _upload_limit_fits_the_antivirus(self) -> "Settings":
+        # Refuse to start rather than accept files that would all end in ERROR (never scannable).
+        if self.max_upload_bytes > self.clamav_stream_max_bytes:
+            raise ValueError(
+                f"MAX_UPLOAD_BYTES ({self.max_upload_bytes}) must be <= CLAMAV_STREAM_MAX_BYTES "
+                f"({self.clamav_stream_max_bytes}): larger files could not be scanned by ClamAV"
+            )
+        return self
 
     @model_validator(mode="after")
     def _reject_weak_secrets_in_production(self) -> "Settings":

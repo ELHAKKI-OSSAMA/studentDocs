@@ -81,7 +81,13 @@
     "issued_document_required": "Déposez d'abord le document final.",
     "delivery_mode_mismatch": "Ce statut ne correspond pas au mode de remise des documents.",
     "invalid_assignee": "Cet utilisateur ne peut pas traiter de demandes.",
-    "concurrent_update": "La demande a été modifiée entre-temps. Rechargez la page."
+    "concurrent_update": "La demande a été modifiée entre-temps. Rechargez la page.",
+    "document_not_available": "Ce fichier n'est pas disponible : l'analyse antivirus est en cours ou a échoué.",
+    "file_extension_mismatch": "L'extension du fichier ne correspond pas à son contenu.",
+    "file_mime_mismatch": "Le type déclaré du fichier ne correspond pas à son contenu.",
+    "file_name_not_allowed": "Ce nom de fichier n'est pas autorisé (extension dangereuse).",
+    "issued_document_not_clean": "Le document final n'a pas encore été accepté par l'antivirus.",
+    "rescan_not_allowed": "Seul un fichier dont l'analyse a échoué peut être analysé à nouveau."
   },
   "home": {
     "title": "Vos documents administratifs, simplement",
@@ -332,7 +338,6 @@
     "keep": "Conserver",
     "cancelled": "Demande annulée.",
     "download": "Télécharger",
-    "notScanned": "Fichiers non analysés par antivirus (analyse prévue dans une prochaine étape).",
     "kindATTACHMENT": "Pièce justificative",
     "kindISSUED": "Document délivré",
     "kindMESSAGE": "Pièce jointe",
@@ -390,7 +395,9 @@
     "INFORMATION_REQUESTED": "Une information est demandée pour la demande {reference}.",
     "NEW_MESSAGE": "Nouveau message sur la demande {reference}.",
     "INFORMATION_PROVIDED": "L'étudiant a répondu pour la demande {reference}.",
-    "REQUEST_ASSIGNED": "La demande {reference} vous a été attribuée."
+    "REQUEST_ASSIGNED": "La demande {reference} vous a été attribuée.",
+    "DOCUMENT_INFECTED": "Demande {reference} : un fichier que vous avez envoyé a été rejeté par l'antivirus.",
+    "DOCUMENT_SCAN_FAILED": "Demande {reference} : l'analyse antivirus d'un fichier n'a pas pu aboutir."
   },
   "enrollments": {
     "title": "Inscriptions à vérifier",
@@ -404,5 +411,25 @@
     "empty": "Aucune inscription à afficher.",
     "review": "Vérification",
     "reviewedBy": "Par {name}, le {date}"
+  },
+  "scan": {
+    "NOT_SCANNED": "Non analysé",
+    "SCANNING": "Analyse antivirus en cours",
+    "CLEAN": "Accepté",
+    "INFECTED": "Rejeté : menace détectée",
+    "ERROR": "Erreur d'analyse",
+    "explainNOT_SCANNED": "Ce fichier n'a pas été analysé : il reste indisponible.",
+    "explainSCANNING": "Fichier reçu. Il sera téléchargeable une fois l'analyse antivirus terminée.",
+    "explainCLEAN": "Fichier accepté par l'antivirus.",
+    "explainINFECTED": "Une menace a été détectée : ce fichier est isolé et ne sera jamais transmis. Envoyez un autre fichier.",
+    "explainERROR": "L'analyse n'a pas pu aboutir : le fichier reste indisponible jusqu'à une nouvelle analyse.",
+    "notice": "Chaque fichier est analysé par un antivirus ; il n'est téléchargeable qu'une fois accepté.",
+    "receivedScanning": "Fichier(s) reçu(s) : analyse antivirus en cours.",
+    "detail": "Détail de l'analyse",
+    "originalName": "Nom d'origine",
+    "rescan": "Relancer l'analyse",
+    "rescanQueued": "Nouvelle analyse demandée.",
+    "replace": "Supprimer pour remplacer",
+    "deleted": "Fichier supprimé. Déposez la nouvelle version."
   }
 }

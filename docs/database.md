@@ -84,13 +84,23 @@ Index : `(status, created_at)`, `(student_id)`, `(assigned_to_id)`, `(academic_y
 request_messages(id, request_id FK, author_user_id FK, author_side CHECK (STUDENT | STAFF), seq BIGINT IDENTITY,
                  kind CHECK (MESSAGE | INFORMATION_REQUEST | INFORMATION_RESPONSE), body, read_at NULL, created_at)
                  -- index (request_id, seq) ; le fil est trié par seq (indépendant de l'horloge)
-documents(id, request_id FK CASCADE, request_item_id FK NULL, message_id FK NULL,
-          kind CHECK (ATTACHMENT | ISSUED | MESSAGE), filename, mime_type, size_bytes, sha256,
-          storage_key UNIQUE, scan_status CHECK (NOT_SCANNED | PENDING | CLEAN | INFECTED) DEFAULT NOT_SCANNED,
+documents(id, request_id FK, request_item_id FK NULL, message_id FK NULL,
+          kind CHECK (ATTACHMENT | ISSUED | MESSAGE),
+          filename,                     -- nom affiché normalisé
+          original_filename NULL,       -- nom envoyé, nettoyé (personnel uniquement)
+          mime_type,                    -- détecté sur le contenu
+          size_bytes, sha256,           -- calculés sur le contenu réel
+          storage_key UNIQUE,           -- tenants/<tenant>/requests/<id>/<uuid> ou quarantine/…
+          scan_status CHECK (NOT_SCANNED | SCANNING | CLEAN | INFECTED | ERROR) DEFAULT SCANNING,
+          scan_detail NULL,             -- virus_detected:<signature> | scanner_unavailable | scanner_error
+                                        -- | file_missing | scan_failed
+          scan_attempts INT DEFAULT 0, scanned_at NULL, quarantined_at NULL,
+          deleted_at NULL, deleted_by_id FK users NULL,   -- suppression logique (remplacement)
           uploaded_by_id FK, created_at)
+          -- index (sha256) : doublons ; index partiel (scan_status) WHERE scan_status = 'SCANNING' : reprise
 ```
 
-`storage_key` (clé S3 aléatoire) reste interne : l'API ne l'expose jamais. Les notes internes entre admins et les pièces jointes d'emails viendront avec les phases suivantes.
+`storage_key` reste interne : l'API ne l'expose jamais. Seul un document `CLEAN` et non supprimé est téléchargeable. La migration `0004_document_scanning` fait passer en `SCANNING` les fichiers stockés avant l'antivirus (`NOT_SCANNED` / `PENDING`) ; le worker les analyse à son démarrage. Les notes internes entre admins et les pièces jointes d'emails viendront avec les phases suivantes.
 
 ## Email et IA
 
@@ -120,7 +130,7 @@ audit_logs(id BIGINT, actor_user_id NULL, action, entity, entity_id, ip INET NUL
            -- append-only (trigger forbid_modification) ; index (entity, entity_id), (created_at), (actor_user_id)
 ```
 
-Actions auditées en Phase 2 : `REQUEST_CREATED`, `STATUS_CHANGED`, `REQUEST_ASSIGNED`, `DOCUMENT_UPLOADED`, `DOCUMENT_DOWNLOADED`, `MESSAGE_SENT`, `ENROLLMENT_REVIEWED`.
+Actions auditées en Phase 2 et 3 : `REQUEST_CREATED`, `STATUS_CHANGED`, `REQUEST_ASSIGNED`, `DOCUMENT_UPLOADED`, `DOCUMENT_DOWNLOADED`, `MESSAGE_SENT`, `ENROLLMENT_REVIEWED`, puis en Phase 3 `DOCUMENT_SCANNED`, `DOCUMENT_DOWNLOAD_REFUSED`, `DOCUMENT_DELETED`, `DOCUMENT_RESCAN_REQUESTED`.
 
 Prévu pour la Phase 5 :
 

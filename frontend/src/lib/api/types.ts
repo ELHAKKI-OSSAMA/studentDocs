@@ -155,6 +155,8 @@ export type RequestItem = { id: string; quantity: number; document_type: Request
 
 export type DocumentKind = "ATTACHMENT" | "ISSUED" | "MESSAGE";
 
+export type ScanStatus = "NOT_SCANNED" | "SCANNING" | "CLEAN" | "INFECTED" | "ERROR";
+
 /** File metadata only: the storage location is never exposed, downloads go through the API. */
 export type RequestDocument = {
   id: string;
@@ -162,10 +164,19 @@ export type RequestDocument = {
   filename: string;
   mime_type: string;
   size_bytes: number;
-  scan_status: "NOT_SCANNED" | "PENDING" | "CLEAN" | "INFECTED";
+  sha256: string;
+  scan_status: ScanStatus;
+  /** virus_detected, scanner_unavailable, scanner_error, file_missing, scan_failed */
+  scan_reason: string | null;
+  scanned_at: string | null;
+  /** Only CLEAN files can be downloaded. */
+  can_download: boolean;
   request_item_id: string | null;
   message_id: string | null;
   created_at: string;
+  /** Staff only. */
+  original_filename: string | null;
+  scan_detail: string | null;
 };
 
 export type HistoryEntry = {
@@ -250,7 +261,9 @@ export type NotificationType =
   | "INFORMATION_REQUESTED"
   | "NEW_MESSAGE"
   | "INFORMATION_PROVIDED"
-  | "REQUEST_ASSIGNED";
+  | "REQUEST_ASSIGNED"
+  | "DOCUMENT_INFECTED"
+  | "DOCUMENT_SCAN_FAILED";
 
 export type AppNotification = {
   id: string;
