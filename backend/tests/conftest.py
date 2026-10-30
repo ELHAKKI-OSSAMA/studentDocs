@@ -31,8 +31,14 @@ TEST_DOMAIN = "test-univ.ma"
 PASSWORD = "Passw0rd-test-123"
 MAILPIT_API_URL = os.environ.get("MAILPIT_API_URL", "http://localhost:8025")
 SESSION_PREFIX = f"test:{uuid.uuid4().hex[:8]}:"
-# Dedicated Celery queue: the stack's own worker (main database) never consumes test scans.
+# Dedicated Celery queues: the stack's own worker (main database) never consumes test tasks.
 SCAN_QUEUE = f"test-documents-{uuid.uuid4().hex[:8]}"
+EMAIL_QUEUE = f"test-email-{uuid.uuid4().hex[:8]}"
+AI_QUEUE = f"test-ai-{uuid.uuid4().hex[:8]}"
+# GreenMail (SMTP + IMAP test server, docker-compose.test.yml) and the in-process scripted LLM server.
+GREENMAIL_HOST = os.environ.get("GREENMAIL_HOST", "greenmail")
+TRUSTED_AUTHSERV_ID = "mx.test-univ.ma"
+LLM_SERVER: dict = {}
 
 
 def _test_settings(**overrides) -> Settings:
@@ -52,13 +58,46 @@ def _test_settings(**overrides) -> Settings:
         "scan_queue": SCAN_QUEUE,
         "scan_max_retries": 1,
         "scan_retry_base_seconds": 1,
+        # Inbound email: GreenMail, plain IMAP (test server only); one mailbox per test (imap_username).
+        "imap_host": GREENMAIL_HOST,
+        "imap_port": 3143,
+        "imap_ssl": False,
+        "imap_username": "unused@test-univ.ma",
+        "imap_password": "greenmail-test-only",
+        "imap_timeout_seconds": 10,
+        "email_trusted_authserv_ids": [TRUSTED_AUTHSERV_ID],
+        "email_queue": EMAIL_QUEUE,
+        "email_process_max_retries": 1,
+        # AI: the scripted local server (loopback = local provider), short timeout, one retry.
+        "ai_provider": "openai_compatible",
+        "ai_base_url": LLM_SERVER.get("url", "http://127.0.0.1:9/v1"),
+        "ai_model": "studentdocs-test-model",
+        "ai_timeout_seconds": 3,
+        "ai_max_retries": 1,
+        "ai_queue": AI_QUEUE,
     }
     values.update(overrides)
     return Settings(**values)
 
 
 @pytest.fixture(scope="session")
-def settings() -> Settings:
+def llm_server():
+    """Scripted OpenAI-compatible server on the loopback interface (tests/support/llm_server.py)."""
+    import threading
+
+    from tests.support import llm_server as module
+
+    server = module.serve("127.0.0.1", 0)
+    LLM_SERVER["url"] = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    LLM_SERVER["received"] = module.RECEIVED
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield LLM_SERVER
+    server.shutdown()
+
+
+@pytest.fixture(scope="session")
+def settings(llm_server) -> Settings:
     return _test_settings()
 
 
@@ -96,7 +135,7 @@ def scan_worker(settings: Settings, migrated_db: str):
         pool="threads",
         concurrency=2,
         perform_ping_check=False,
-        queues=[settings.scan_queue],
+        queues=[settings.scan_queue, settings.email_queue, settings.ai_queue],
         shutdown_timeout=30,
     ) as worker:
         yield worker

@@ -153,7 +153,7 @@ export type RequestDocumentType = {
 
 export type RequestItem = { id: string; quantity: number; document_type: RequestDocumentType };
 
-export type DocumentKind = "ATTACHMENT" | "ISSUED" | "MESSAGE";
+export type DocumentKind = "ATTACHMENT" | "ISSUED" | "MESSAGE" | "EMAIL_ATTACHMENT";
 
 export type ScanStatus = "NOT_SCANNED" | "SCANNING" | "CLEAN" | "INFECTED" | "ERROR";
 
@@ -283,4 +283,137 @@ export const PERMS = {
   requestsRead: "requests.read",
   requestsProcess: "requests.process",
   enrollmentsVerify: "enrollments.verify",
+  emailsRead: "emails.read",
 } as const;
+
+// --- inbound email (Phase 4) ----------------------------------------------------------------------
+
+export const EMAIL_CASE_STATUSES = [
+  "NEW",
+  "AI_PROCESSING",
+  "NEEDS_REVIEW",
+  "CONVERTED",
+  "LINKED",
+  "DISMISSED",
+  "FAILED",
+  "IGNORED",
+] as const;
+export type EmailCaseStatus = (typeof EMAIL_CASE_STATUSES)[number];
+
+export const REVIEW_CONFIDENCES = ["LOW", "MEDIUM", "HIGH"] as const;
+/** Deterministic completeness level for sorting the review queue: never a probability, never a permission. */
+export type ReviewConfidence = (typeof REVIEW_CONFIDENCES)[number];
+
+export type AuthVerdict = "PASS" | "FAIL" | "CONTRADICTORY" | "ABSENT" | "INCONCLUSIVE";
+
+export type EmailStudentRef = RequestStudent;
+
+export type EmailCaseListItem = {
+  id: string;
+  status: EmailCaseStatus;
+  from_address: string;
+  from_name: string | null;
+  subject: string;
+  received_at: string;
+  review_confidence: ReviewConfidence | null;
+  student: EmailStudentRef | null;
+  candidate_count: number;
+  detected_reference: string | null;
+  attachment_count: number;
+  assigned_to: PersonRef | null;
+  authentication: AuthVerdict;
+  injection_suspected: boolean;
+  ai_failed: boolean;
+  infected_attachment: boolean;
+  created_at: string;
+};
+
+export type Evidence = { value: string; quote: string };
+
+export type ExtractedItem = { document_type_code: string; quantity: number | null; quote: string };
+
+export type ExtractionOutput = {
+  is_document_request: boolean | null;
+  student_number: Evidence | null;
+  student_email: Evidence | null;
+  full_name: Evidence | null;
+  academic_year_label: Evidence | null;
+  branch_hint: Evidence | null;
+  level_hint: Evidence | null;
+  requested_documents: ExtractedItem[];
+  request_reference: string | null;
+  reason: string | null;
+  missing_information: string[];
+  suspicious_content: boolean;
+  matches: { academic_year_id?: string; branch_ids?: string[]; study_level_ids?: string[] };
+};
+
+export type EmailExtraction = {
+  id: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  is_local_provider: boolean;
+  output: ExtractionOutput | null;
+  rule_violations: { field: string; reason: string; code?: string }[];
+  error_code: string | null;
+  review_confidence: ReviewConfidence | null;
+  review_score: number | null;
+  latency_ms: number | null;
+  created_at: string;
+};
+
+export type EmailCorrection = {
+  student_number: string | null;
+  academic_year_id: string | null;
+  branch_id: string | null;
+  study_level_id: string | null;
+  enrollment_id: string | null;
+  requested_documents: { document_type_id: string; quantity: number }[];
+  reason: string | null;
+};
+
+export type EmailCandidate = { student: EmailStudentRef; reasons: string[]; score: number };
+
+export type EmailRequestRef = { id: string; reference: string; status: RequestStatus; student_id: string };
+
+export type EmailReview = {
+  id: string;
+  decision: string;
+  actor: PersonRef;
+  corrected_output: Record<string, unknown> | null;
+  comment: string | null;
+  created_at: string;
+};
+
+export type EmailCaseDetail = EmailCaseListItem & {
+  to_addresses: string[];
+  cc_addresses: string[];
+  sent_at: string | null;
+  message_id_header: string | null;
+  identification_method: "INSTITUTIONAL_EMAIL" | "KNOWN_EMAIL" | "ADMIN_MANUAL" | null;
+  candidates: EmailCandidate[];
+  body_text: string | null;
+  /** Sanitized server side; only ever rendered inside a sandboxed iframe. */
+  body_html: string | null;
+  flags: Record<string, unknown>;
+  linked_request: EmailRequestRef | null;
+  reference_request: EmailRequestRef | null;
+  extraction: EmailExtraction | null;
+  correction: EmailCorrection | null;
+  reviews: EmailReview[];
+  documents: RequestDocument[];
+  rejected_attachments: { filename: string; code: string; size_bytes: number }[];
+  failure_code: string | null;
+  dismiss_reason: string | null;
+  version: number;
+  can_process: boolean;
+  can_convert: boolean;
+  can_dismiss: boolean;
+  can_read_raw: boolean;
+  can_reextract: boolean;
+  can_retry: boolean;
+  can_reopen: boolean;
+};
+
+export type StudentDetail = StudentListItem & { enrollments: Enrollment[] };

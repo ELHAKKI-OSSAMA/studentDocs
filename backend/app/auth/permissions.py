@@ -22,3 +22,10 @@ class Perm(enum.StrEnum):
     REQUESTS_APPROVE = "requests.approve"
     REQUESTS_REJECT = "requests.reject"
     ENROLLMENTS_VERIFY = "enrollments.verify"
+    # Inbound email review (Phase 4)
+    EMAILS_READ = "emails.read"
+    EMAILS_READ_RAW = "emails.read_raw"
+    EMAILS_PROCESS = "emails.process"
+    EMAILS_CONVERT = "emails.convert"
+    EMAILS_DISMISS = "emails.dismiss"
+    EMAIL_ACCOUNTS_MANAGE = "email_accounts.manage"

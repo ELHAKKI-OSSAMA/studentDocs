@@ -33,13 +33,19 @@ class PendingUploads:
         db: AsyncSession,
         file: ValidatedFile,
         *,
-        request_id: uuid.UUID,
+        request_id: uuid.UUID | None,
         kind: DocumentKind,
-        uploaded_by: uuid.UUID,
+        uploaded_by: uuid.UUID | None,
         request_item_id: uuid.UUID | None = None,
         message_id: uuid.UUID | None = None,
+        email_case_id: uuid.UUID | None = None,
     ) -> Document:
-        key = self.storage.new_key(request_id)
+        if request_id is not None:
+            key = self.storage.new_key(request_id)
+        elif email_case_id is not None and kind == DocumentKind.EMAIL_ATTACHMENT:
+            key = self.storage.new_email_attachment_key(email_case_id)
+        else:  # also enforced by the database (ck_documents_owner / ck_documents_uploader)
+            raise ValueError("A document belongs to a request or to an email case")
         try:
             await self.storage.put_stream(key, file.file, file.mime_type)
         finally:
@@ -47,6 +53,7 @@ class PendingUploads:
         self.keys.append(key)
         doc = Document(
             request_id=request_id,
+            email_case_id=email_case_id,
             request_item_id=request_item_id,
             message_id=message_id,
             kind=kind,
@@ -74,7 +81,11 @@ class PendingUploads:
             self.queue.enqueue([d.id for d in self.documents])
 
 
-def audit_upload(db: AsyncSession, doc: Document, *, actor_id: uuid.UUID, ip: str | None) -> None:
+def owner_details(doc: Document) -> dict:
+    return doc.owner_details()
+
+
+def audit_upload(db: AsyncSession, doc: Document, *, actor_id: uuid.UUID | None, ip: str | None) -> None:
     """Upload audit entry: metadata only, never the content."""
     record(
         db,
@@ -84,7 +95,7 @@ def audit_upload(db: AsyncSession, doc: Document, *, actor_id: uuid.UUID, ip: st
         entity_id=doc.id,
         ip=ip,
         details={
-            "request_id": str(doc.request_id),
+            **owner_details(doc),
             "kind": doc.kind.value,
             "mime_type": doc.mime_type,
             "size_bytes": doc.size_bytes,
@@ -130,7 +141,7 @@ async def download_response(
             entity="document",
             entity_id=doc.id,
             ip=ip,
-            details={"request_id": str(doc.request_id), "scan_status": doc.scan_status.value},
+            details={**owner_details(doc), "scan_status": doc.scan_status.value},
         )
         await db.commit()
         raise AppError.of(
@@ -150,7 +161,7 @@ async def download_response(
         entity="document",
         entity_id=doc.id,
         ip=ip,
-        details={"request_id": str(doc.request_id), "kind": doc.kind.value},
+        details={**owner_details(doc), "kind": doc.kind.value},
     )
     await db.commit()
     ascii_name = doc.filename.encode("ascii", "replace").decode().replace('"', "_").replace("?", "_")
@@ -180,7 +191,7 @@ def soft_delete(db: AsyncSession, doc: Document, *, actor_id: uuid.UUID, ip: str
         entity="document",
         entity_id=doc.id,
         ip=ip,
-        details={"request_id": str(doc.request_id), "kind": doc.kind.value, "sha256": doc.sha256},
+        details={**owner_details(doc), "kind": doc.kind.value, "sha256": doc.sha256},
     )
     return doc.storage_key
 

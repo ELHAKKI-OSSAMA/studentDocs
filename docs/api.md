@@ -107,6 +107,27 @@ Another student's request (or document, or message thread) always answers `404`.
 
 `{entity}` ∈ `academic-years`, `branch-categories`, `branches`, `study-levels`, `document-types`. Deleting an entry that is still referenced → `409 in_use` (deactivate it instead).
 
+## Inbound email `/admin/emails` — `admin.access` + the permission listed (no student endpoint)
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/admin/emails?status=&confidence=&q=&assigned=me\|unassigned` | `emails.read` |
+| GET | `/admin/emails/stats` (counts, last mailbox poll, AI provider and whether it is local) | `emails.read` |
+| GET | `/admin/emails/{id}` (sanitized text and HTML, candidates, AI proposal, correction, reviews, attachments, `can_*`) | `emails.read` |
+| GET | `/admin/emails/{id}/raw` (original `.eml`, `Content-Disposition: attachment`, `nosniff`, audited) | `emails.read_raw` |
+| GET | `/admin/emails/{id}/documents/{document_id}/download` (CLEAN only, else `409 document_not_available`) | `emails.read` |
+| POST | `/admin/emails/{id}/documents/{document_id}/rescan` (from `ERROR`) | `emails.process` |
+| POST | `/admin/emails/{id}/assign` `{assignee_id \| null}` | `emails.process` |
+| POST | `/admin/emails/{id}/student` `{student_id, comment?}` | `emails.process` |
+| PUT | `/admin/emails/{id}/extraction` (human correction, stored next to the AI proposal) | `emails.process` |
+| POST | `/admin/emails/{id}/convert` `{student_id, enrollment_id, items[{document_type_id, quantity, attachment_ids[]}], reason?, extra_info?, version}` → `201` request (source `EMAIL`) | `emails.convert` + `requests.process` |
+| POST | `/admin/emails/{id}/link` `{request_id, attachment_ids[], as_information_response, version}` | `emails.process` |
+| POST | `/admin/emails/{id}/dismiss` · `/ignore` `{reason}` | `emails.dismiss` |
+| POST | `/admin/emails/{id}/reopen` `{comment?}` | `emails.dismiss` |
+| POST | `/admin/emails/{id}/retry` (FAILED, except `too_large`) · `/reextract` (when an AI provider is configured) | `emails.process` |
+
+Errors: `409 email_case_status_conflict` (action not possible in this status), `409 concurrent_update` (stale `version` or concurrent action), `422 student_mismatch`, `422 attachment_not_clean`, `422 invalid_attachment`, `422 invalid_student`, `409 retry_not_possible`, `409 ai_disabled`, plus every request-creation error of Phase 2 (`enrollment_not_verified`, `document_type_not_allowed`, `quantity_exceeded`, `attachment_required`).
+
 ## Health
 
 `GET /health/live`, `GET /health/ready` (database, Redis, storage, antivirus; returns `503` without detail when a dependency is down).

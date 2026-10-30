@@ -7,6 +7,9 @@ BASE = {
     "database_url": "postgresql+asyncpg://u:p@db/x",
     "s3_access_key": "k",
     "s3_secret_key": "s",
+    # Independent of the inbound email / AI variables of the test stack (docker-compose.test.yml).
+    "imap_host": "",
+    "ai_provider": "none",
 }
 
 

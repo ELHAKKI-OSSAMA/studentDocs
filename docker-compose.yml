@@ -34,6 +34,26 @@ x-backend-env: &backend-env
   SCAN_QUEUE: documents
   SCAN_MAX_RETRIES: ${SCAN_MAX_RETRIES:-5}
   SCAN_RETRY_BASE_SECONDS: ${SCAN_RETRY_BASE_SECONDS:-10}
+  # Inbound email (Phase 4): polling stays disabled while IMAP_HOST is empty. Credentials come from .env.
+  IMAP_HOST: ${IMAP_HOST:-}
+  IMAP_PORT: ${IMAP_PORT:-993}
+  IMAP_SSL: ${IMAP_SSL:-true}
+  IMAP_USERNAME: ${IMAP_USERNAME:-}
+  IMAP_PASSWORD: ${IMAP_PASSWORD:-}
+  IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
+  IMAP_ADDRESS: ${IMAP_ADDRESS:-}
+  EMAIL_POLL_SECONDS: ${EMAIL_POLL_SECONDS:-60}
+  EMAIL_TRUSTED_AUTHSERV_IDS: ${EMAIL_TRUSTED_AUTHSERV_IDS:-[]}
+  EMAIL_QUEUE: email
+  # AI extraction: "none" by default. With a provider there is never any fallback to another one.
+  AI_PROVIDER: ${AI_PROVIDER:-none}
+  AI_BASE_URL: ${AI_BASE_URL:-}
+  AI_MODEL: ${AI_MODEL:-}
+  AI_API_KEY: ${AI_API_KEY:-}
+  AI_ALLOW_EXTERNAL: ${AI_ALLOW_EXTERNAL:-false}
+  AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-60}
+  AI_JSON_MODE: ${AI_JSON_MODE:-json_schema}
+  AI_QUEUE: ai
 
 services:
   postgres:
@@ -140,7 +160,7 @@ services:
   worker:
     build: { context: ./backend, target: dev }
     environment: *backend-env
-    command: ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "celery,documents", "--loglevel=INFO", "--concurrency=2"]
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "celery,documents,email,ai", "--loglevel=INFO", "--concurrency=2"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -152,6 +172,15 @@ services:
       interval: 30s
       timeout: 15s
       retries: 5
+
+  # Periodic jobs (mailbox poll, email case sweep). Exactly one instance: never run `worker -B` as well.
+  beat:
+    build: { context: ./backend, target: dev }
+    environment: *backend-env
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=INFO", "--schedule", "/tmp/celerybeat-schedule"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
 
   frontend:
     build: { context: ./frontend }
@@ -182,6 +211,8 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+          # Dynamic addresses come from the upper half: 172.30.0.10 stays free for the Caddy entry point.
+          ip_range: 172.30.0.128/25
 
 volumes:
   pgdata:

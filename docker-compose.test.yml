@@ -1,0 +1,57 @@
+# Test-only additions — never part of a production deployment:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
+#
+# - greenmail: SMTP (3025) + IMAP (3143) test mail server (authentication disabled, no TLS);
+# - llm-test: scripted OpenAI-compatible HTTP server (backend/tests/support/llm_server.py), no real model;
+# - backend / worker / beat: inbound email and AI extraction pointed at those two services, so that the
+#   E2E suite can send an email by SMTP and watch it go through polling, processing and extraction.
+# pytest (run in the backend container) uses the same GreenMail with one mailbox per test.
+
+x-test-env: &test-env
+  IMAP_HOST: greenmail
+  IMAP_PORT: "3143"
+  IMAP_SSL: "false"
+  IMAP_USERNAME: scolarite@univ-demo.ma
+  IMAP_PASSWORD: greenmail-test-only
+  EMAIL_POLL_SECONDS: "3"
+  EMAIL_TRUSTED_AUTHSERV_IDS: '["mx.univ-demo.ma"]'
+  AI_PROVIDER: openai_compatible
+  AI_BASE_URL: http://llm-test:8080/v1
+  AI_MODEL: studentdocs-test-model
+  AI_TIMEOUT_SECONDS: "10"
+  GREENMAIL_HOST: greenmail
+  LLM_TEST_SERVER_URL: http://llm-test:8080
+
+services:
+  greenmail:
+    image: greenmail/standalone:2.1.3
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3143"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  llm-test:
+    build: { context: ./backend, target: dev }
+    command: ["python", "-m", "tests.support.llm_server", "--host", "0.0.0.0", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/_health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    environment: *test-env
+    depends_on:
+      greenmail: { condition: service_healthy }
+      llm-test: { condition: service_healthy }
+
+  worker:
+    environment: *test-env
+    depends_on:
+      greenmail: { condition: service_healthy }
+      llm-test: { condition: service_healthy }
+
+  beat:
+    environment: *test-env

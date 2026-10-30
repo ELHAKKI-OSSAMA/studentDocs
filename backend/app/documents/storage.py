@@ -4,6 +4,8 @@ The bucket is private: objects are only reachable with the backend's credentials
 user input (no original file name, no path traversal) and are not guessable:
 
     tenants/<tenant>/requests/<request id>/<random uuid>        regular files
+    tenants/<tenant>/emails/<email case id>/<random uuid>        email attachments
+    tenants/<tenant>/emails/raw/<random uuid>                    raw received messages (.eml)
     quarantine/tenants/<tenant>/requests/<request id>/<uuid>     infected files, moved after the scan
 """
 
@@ -40,6 +42,12 @@ class ObjectStorage:
 
     def new_key(self, request_id: uuid.UUID) -> str:
         return f"tenants/{self.tenant}/requests/{request_id}/{uuid.uuid4().hex}"
+
+    def new_email_attachment_key(self, email_case_id: uuid.UUID) -> str:
+        return f"tenants/{self.tenant}/emails/{email_case_id}/{uuid.uuid4().hex}"
+
+    def new_raw_email_key(self) -> str:
+        return f"tenants/{self.tenant}/emails/raw/{uuid.uuid4().hex}"
 
     @staticmethod
     def quarantine_key(key: str) -> str:

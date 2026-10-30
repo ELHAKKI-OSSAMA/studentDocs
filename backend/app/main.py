@@ -20,6 +20,8 @@ from app.core.storage import create_s3_client
 from app.documents.scanning import celery_scan_queue
 from app.documents.service import DocumentPipeline
 from app.documents.storage import ObjectStorage
+from app.emails.cases import celery_email_queue
+from app.emails.router import router as admin_emails_router
 from app.notifications.router import router as notifications_router
 from app.requests.admin_router import router as admin_requests_router
 from app.requests.router import router as requests_router
@@ -41,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.s3 = create_s3_client(settings)
         app.state.storage = ObjectStorage(app.state.s3, settings.s3_bucket, settings.storage_tenant)
         app.state.documents = DocumentPipeline(app.state.storage, celery_scan_queue(settings.scan_queue))
+        app.state.email_tasks = celery_email_queue(settings.email_queue, settings.ai_queue)
         try:
             yield
         finally:
@@ -77,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         enrollments_admin_router,
         requests_router,
         admin_requests_router,
+        admin_emails_router,
         notifications_router,
     ):
         app.include_router(router)

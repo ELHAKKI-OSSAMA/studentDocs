@@ -12,6 +12,8 @@ MODEL_MODULES: list[str] = [
     "app.notifications.models",
     "app.documents.models",
     "app.audit.models",
+    "app.emails.models",
+    "app.ai.models",
 ]
 
 

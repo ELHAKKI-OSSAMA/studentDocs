@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ class DocumentKind(enum.StrEnum):
     ATTACHMENT = "ATTACHMENT"  # supporting document provided by the student
     ISSUED = "ISSUED"  # final document produced by the administration
     MESSAGE = "MESSAGE"  # file attached to a message
+    EMAIL_ATTACHMENT = "EMAIL_ATTACHMENT"  # file received by email (EmailCase), attached on conversion
 
 
 class ScanStatus(enum.StrEnum):
@@ -45,10 +46,19 @@ class Document(UUIDPrimaryKey, Base):
         Index("ix_documents_sha256", "sha256"),
         # Recovery sweep: files still waiting for a scan.
         Index("ix_documents_scanning", "scan_status", postgresql_where=text("scan_status = 'SCANNING'")),
+        # Every file belongs to a request, to an email case, or to both (email attachment after conversion).
+        CheckConstraint("num_nonnulls(request_id, email_case_id) >= 1", name="owner"),
+        # Only email attachments have no human uploader (they come from the mailbox).
+        CheckConstraint("uploaded_by_id IS NOT NULL OR kind = 'EMAIL_ATTACHMENT'", name="uploader"),
     )
 
-    request_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("requests.id", ondelete="RESTRICT"), nullable=False, index=True
+    # NULL only for an email attachment that is not (yet) part of a request.
+    request_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("requests.id", ondelete="RESTRICT"), index=True
+    )
+    # Email case the file was received with. Kept after conversion (same row, full traceability).
+    email_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("email_cases.id", ondelete="RESTRICT"), index=True
     )
     # Supporting document for a specific requested document type.
     request_item_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -79,12 +89,20 @@ class Document(UUIDPrimaryKey, Base):
     deleted_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
     )
-    uploaded_by_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    # NULL for email attachments (received by the system, not uploaded by a user).
+    uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    def owner_details(self) -> dict:
+        """Audit references of the request and/or email case the document belongs to."""
+        details = {"request_id": str(self.request_id) if self.request_id else None}
+        if self.email_case_id:
+            details["email_case_id"] = str(self.email_case_id)
+        return details
 
     @property
     def downloadable(self) -> bool:

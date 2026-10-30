@@ -41,8 +41,8 @@ Admin (écran AI Review) ─▶ identifie l'étudiant, corrige, confirme ─▶ 
 | `requests` | agrégat Request, machine d'état (`workflow.py`), actions (`actions.py`), numérotation |
 | `documents` | validation (`validation.py`), stockage S3 privé (`storage.py`), antivirus (`scanner.py`, `scanning.py`), téléchargement autorisé (`service.py`) |
 | `messages` | fil de messages par demande |
-| `email` | `EmailProvider` (IMAP d'abord), ingestion, `EmailCase` |
-| `ai` | `LLMProvider` (Claude, OpenAI-compatible, Ollama), prompts versionnés, pipeline |
+| `emails` | `EmailProvider` (IMAP), ingestion, parsing, nettoyage, identification, `EmailCase`, revue |
+| `ai` | `LLMProvider` (OpenAI-compatible : Ollama, vLLM, LM Studio…), prompt versionné, validation, anti-injection |
 | `notifications` | `NotificationService` (in-app en Phase 2 ; canal email en Phase 5) |
 | `audit` | journal append-only |
 | `admin` | dashboard et statistiques |
@@ -208,24 +208,67 @@ Le SHA-256 est indexé : des fichiers identiques peuvent être retrouvés. Ils n
 - Mêmes règles d'accès que la demande : un autre étudiant reçoit `404`.
 - Notifications **in-app** (`notifications`) : réception, changement de statut, information demandée, nouveau message, réponse de l'étudiant, attribution. Compteur dans l'en-tête (rafraîchi toutes les 30 s). L'envoi par email est prévu en Phase 5.
 
-## Workflow d'un email entrant (`EmailCase`)
+## Emails entrants et extraction IA (Phase 4, implémenté)
 
 ```
-NEW ──▶ AI_PROCESSING ──▶ NEEDS_REVIEW ──▶ CONVERTED   (Request créée et liée)
-              │                 ├────────▶ LINKED      (rattaché à une Request existante : relance, réponse)
-              ▼                 └────────▶ DISMISSED   (spam, hors sujet, doublon) — motif obligatoire
-            FAILED ──(relance)──▶ AI_PROCESSING
-IGNORED : filtré de façon déterministe (auto-reply, bounce, Message-ID déjà vu)
+Celery Beat (email.poll, EMAIL_POLL_SECONDS) ─▶ ImapProvider (lecture seule, BODY.PEEK, timeout, verrou Redis)
+  ─▶ .eml brut en S3 privé (SHA-256) + email_messages + email_cases(NEW)      [1 transaction par message]
+  ─▶ email.process : parsing MIME borné, HTML nettoyé (nh3), règles IGNORED, référence REQ-…,
+                     identification déterministe, pièces jointes → pipeline Phase 3 (validation, S3, ClamAV)
+  ─▶ email.extract (file `ai`) : attend la fin des analyses, corps de l'email seul → LLM → JSON strict
+                     → catalogue fermé + ancrage → review_confidence → NEEDS_REVIEW (toujours)
+  ─▶ revue humaine /admin/emails : corriger, associer l'étudiant, CONVERTIR / RATTACHER / classer
 ```
 
-- `EmailCase.student_id` est **nullable** : un expéditeur inconnu ou une adresse personnelle n'est jamais rejeté automatiquement. L'admin identifie l'étudiant avant la conversion.
-- `Request.student_id` est **NOT NULL**.
-- Au MVP, aucune conversion n'est automatique, même avec une confiance HIGH. Le flag `email_auto_convert` (désactivé) est prévu pour plus tard, une fois la précision mesurée.
+Modules : `app/emails/` (provider, imap, ingestion, parsing, sanitize, references, authentication, identification, processing, cases, router) et `app/ai/` (provider, openai_compat, factory, schemas, extraction, injection).
 
-## Confidentialité IA
+### Cycle de vie d'un `EmailCase`
 
-Le `LLMProvider` déclare `is_local`. Si le fournisseur configuré est local (Ollama, vLLM), aucun appel réseau sortant n'est permis vers un fournisseur externe et il n'y a pas de bascule automatique vers un fournisseur cloud. Le contenu des emails est passé comme donnée non fiable, délimitée, sans aucun outil exposé au modèle.
+| Statut | Sens | Décidé par |
+|---|---|---|
+| `NEW` | reçu et stocké, pas encore traité | système |
+| `AI_PROCESSING` | pièces jointes en analyse et/ou extraction en cours | système |
+| `NEEDS_REVIEW` | prêt pour un humain, **quelle que soit la complétude** ; une panne de l'IA y mène aussi (`flags.ai_failed`) | système |
+| `CONVERTED` | une **nouvelle** demande a été créée (source `EMAIL`) | humain (`emails.convert` + `requests.process`) |
+| `LINKED` | rattaché à une demande **existante** (message dans le fil, pièces CLEAN) | humain (`emails.process`) |
+| `DISMISSED` | lu, sans suite, motif obligatoire | humain (`emails.dismiss`) |
+| `FAILED` | erreur technique (message illisible, trop gros, stockage) ; relançable sauf `too_large` | système |
+| `IGNORED` | écarté **avant toute IA** par une règle déterministe (réponse automatique, bounce, notre propre adresse, doublon) ou par un humain | système / humain |
+
+Réouverture possible de `DISMISSED` / `IGNORED` (auditée). Une demande créée par erreur s'annule par le workflow Phase 2, jamais en défaisant le lien.
+
+### IMAP
+
+Une connexion courte par relève (`IMAP4_SSL`, certificat vérifié ; IMAP en clair interdit en production), `SELECT` en lecture seule, `BODY.PEEK[]` : rien n'est marqué, déplacé ni supprimé sur le serveur. Idempotence : `UNIQUE(account, UIDVALIDITY, UID)`, curseur `last_seen_uid` avancé dans la même transaction que le message, `UNIQUE(account, Message-ID)`, puis hash SHA-256 du brut pour les messages sans Message-ID (dossier `IGNORED` doublon). Un changement de `UIDVALIDITY` remet le curseur à zéro (audit `EMAIL_UIDVALIDITY_RESET`) sans retraiter. Un message plus gros que `EMAIL_MAX_BYTES` n'est pas téléchargé (en-têtes seuls, `FAILED/too_large`). Erreurs IMAP → `email_accounts.last_error` (code seulement), audit `EMAIL_POLL_FAILED`, la relève suivante reprend. Un verrou Redis empêche deux relèves simultanées ; un seul service `beat` existe (ne jamais lancer `worker -B` en plus). Une relève de secours (`email.sweep`, 5 min) relance les dossiers bloqués.
+
+### Identification de l'étudiant
+
+Seule preuve forte : adresse de l'expéditeur = adresse vérifiée d'un étudiant actif **et** verdict `PASS` des en-têtes `Authentication-Results` écrits par un serveur listé dans `EMAIL_TRUSTED_AUTHSERV_IDS`. StudentDocs ne vérifie pas SPF/DKIM/DMARC lui-même : il lit seulement ce que le serveur de réception a enregistré, et ignore les en-têtes d'autres serveurs (falsifiables par l'expéditeur). Le serveur de réception doit supprimer les en-têtes entrants qui prétendent son authserv-id (RFC 8601). Verdicts : `PASS`, `FAIL`, `CONTRADICTORY`, `ABSENT`, `INCONCLUSIVE`. Dans tous les autres cas `student_id` reste NULL et `candidate_students` liste les preuves (adresse non authentifiée, numéro étudiant cité, référence citée, nom identique) ; l'humain décide. L'IA ne fixe jamais `student_id` : un numéro qu'elle extrait ne fait qu'ajouter un candidat par les mêmes règles.
+
+### Pièces jointes
+
+Pipeline Phase 3 inchangé (aucun nouveau scanner) : `validate_stream` → S3 (`tenants/<t>/emails/<case>/<uuid>`) → `documents.scan`. Un document `EMAIL_ATTACHMENT` appartient au dossier (`email_case_id`, `request_id` NULL, pas d'uploader) ; à la conversion ou au rattachement, la **même ligne** reçoit `request_id` (contrainte `ck_documents_owner`). Les types refusés, tailles excessives et pièces au-delà de 10 sont listés dans `flags.rejected_attachments` et restent seulement dans le `.eml`. Une pièce `INFECTED` est en quarantaine, jamais téléchargeable, jamais envoyée à l'IA, jamais rattachée à une demande (`422 attachment_not_clean`). `AI_READ_ATTACHMENTS=false` : seul le corps de l'email est envoyé à l'IA dans cette phase.
+
+### Fournisseur LLM et confidentialité
+
+`LLMProvider` (protocole) avec une seule implémentation, `OpenAICompatibleProvider` (httpx, sans SDK, ni LangChain ni LiteLLM), qui couvre Ollama, vLLM, LM Studio et les API compatibles OpenAI. Un seul fournisseur est configuré (`AI_PROVIDER=none` par défaut) et **il n'existe aucune bascule** : une panne donne `NEEDS_REVIEW` + `ai_failed`. `is_local` est déterminé en résolvant l'hôte (adresses privées / loopback uniquement) ; un hôte non local est refusé sans `AI_ALLOW_EXTERNAL=true` (décision explicite). Chaque requête doit viser cet unique hôte (hook httpx), les redirections ne sont pas suivies et les proxys d'environnement sont ignorés. Sortie structurée JSON, timeout, 3 tentatives sur 429/5xx/timeout, aucune sur réponse invalide.
+
+### Anti-injection
+
+L'email est une donnée : prompt système fixe et versionné (`PROMPT_VERSION`), contenu entre délimiteurs aléatoires (un délimiteur forgé est neutralisé), aucun outil déclaré (une réponse `tool_calls` est rejetée), schéma Pydantic `extra="forbid"`, longueurs bornées, codes de document limités au catalogue, **ancrage** : chaque valeur d'identité et chaque document doivent citer un extrait réellement présent dans l'email, sinon ils sont retirés et listés dans `rule_violations`. Un détecteur déterministe (FR/EN/AR, base64) signale `injection_suspected`. Aucune action métier n'est reliée à la sortie du modèle.
+
+### `review_confidence`
+
+Mesure **déterministe de complétude** (étudiant identifié, document trouvé, inscription correspondante, rien de manquant, aucun signal d'alerte, pièces saines) servant à trier la file. Ce n'est pas une probabilité que l'IA ait raison, la confiance déclarée par le modèle est ignorée, et `HIGH` ne déclenche **aucune** action (testé).
+
+### Conversion et rattachement
+
+Conversion en une transaction : verrou du dossier + version optimiste, règles de `RequestService` (noyau `validate_new_request` / `check_required_attachments` / `insert_request` partagé avec le formulaire web), pièces CLEAN, dossier `CONVERTED`, audit, notification ; toute erreur annule tout. Rattachement : l'étudiant du dossier doit être celui de la demande ; le texte devient un message `STUDENT` du fil, éventuellement réponse à une demande d'information (`NEEDS_INFORMATION → IN_REVIEW`).
+
+### Affichage
+
+Le HTML d'origine n'atteint jamais le navigateur : seul le HTML nettoyé côté serveur (nh3 : pas de script, style, image, iframe, formulaire ; liens http(s)/mailto avec `rel=noopener noreferrer nofollow`) est rendu dans une `iframe sandbox=""` avec CSP `default-src 'none'`. Le texte est affiché par défaut, échappé par React.
 
 ## Infrastructure de développement
 
-`docker compose up` démarre `postgres`, `redis`, `storage` (SeaweedFS, compatible S3), `clamav` (antivirus), `mailpit` (SMTP de test), les tâches ponctuelles `migrate` et `storage-init`, puis `backend`, `worker` et `frontend`. Le worker consomme les files `celery` (emails) et `documents` (analyses) et attend que ClamAV soit sain. `/health/ready` inclut maintenant `antivirus`.
+`docker compose up` démarre `postgres`, `redis`, `storage` (SeaweedFS, compatible S3), `clamav` (antivirus), `mailpit` (SMTP de test), les tâches ponctuelles `migrate` et `storage-init`, puis `backend`, `worker` et `frontend`. Le worker consomme les files `celery` (emails sortants), `documents` (analyses), `email` (relève, traitement) et `ai` (extraction) et attend que ClamAV soit sain. Le service `beat` (unique) planifie la relève IMAP et le balayage de secours. `docker-compose.test.yml` ajoute GreenMail et le serveur LLM de test (jamais en production). `/health/ready` inclut maintenant `antivirus`.

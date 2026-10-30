@@ -16,8 +16,19 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
-    # Scans have their own queue (the worker consumes `celery` and this one).
-    task_routes={"documents.scan": {"queue": settings.scan_queue}},
+    # Scans, inbound email and AI have their own queues: a slow model never delays antivirus scans.
+    task_routes={
+        "documents.scan": {"queue": settings.scan_queue},
+        "email.poll": {"queue": settings.email_queue},
+        "email.process": {"queue": settings.email_queue},
+        "email.sweep": {"queue": settings.email_queue},
+        "email.extract": {"queue": settings.ai_queue},
+    },
+    # Periodic jobs (run by the single `beat` service).
+    beat_schedule={
+        "email-poll": {"task": "email.poll", "schedule": float(settings.email_poll_seconds)},
+        "email-sweep": {"task": "email.sweep", "schedule": 300.0},
+    },
     # A scan never runs forever: clamd has its own socket timeout, this is the hard stop.
     task_time_limit=int(settings.clamav_timeout_seconds * 3),
 )

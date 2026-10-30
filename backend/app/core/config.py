@@ -67,6 +67,48 @@ class Settings(BaseSettings):
     scan_max_retries: int = 5
     scan_retry_base_seconds: int = 10
 
+    # Inbound email (IMAP, read-only). Polling is disabled while IMAP_HOST is empty.
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_ssl: bool = True
+    imap_username: str = ""
+    imap_password: SecretStr | None = None
+    imap_folder: str = "INBOX"
+    # Watched address (the email_accounts row); defaults to IMAP_USERNAME.
+    imap_address: str = ""
+    imap_timeout_seconds: float = 30.0
+    email_poll_seconds: int = 60
+    email_poll_batch: int = 50
+    # A larger message (RFC822.SIZE) is not downloaded: its case is FAILED / too_large.
+    email_max_bytes: int = 25 * 1024 * 1024
+    email_max_attachments: int = 10
+    email_body_max_chars: int = 100_000
+    email_html_max_bytes: int = 2 * 1024 * 1024
+    # authserv-id of the receiving server(s) whose Authentication-Results headers are trusted. Any
+    # other Authentication-Results header may have been written by the sender and is ignored.
+    email_trusted_authserv_ids: list[str] = []
+    email_queue: str = "email"
+    email_process_max_retries: int = 3
+    # Cases stuck in AI_PROCESSING longer than this are re-queued by the periodic sweep.
+    email_stale_minutes: int = 15
+
+    # AI extraction. "none": no extraction, every case goes to human review as is.
+    ai_provider: Literal["none", "openai_compatible"] = "none"
+    ai_base_url: str = ""
+    ai_model: str = ""
+    ai_api_key: SecretStr | None = None
+    # A non-private endpoint is refused unless this explicit decision is set. There is never a fallback.
+    ai_allow_external: bool = False
+    ai_timeout_seconds: float = 60.0
+    ai_max_input_chars: int = 12_000
+    ai_max_output_tokens: int = 1_000
+    ai_max_retries: int = 3
+    ai_queue: str = "ai"
+    # "json_schema" (structured output) or "json_object" for servers without schema support.
+    ai_json_mode: Literal["json_schema", "json_object"] = "json_schema"
+    # Attachments are never sent to the model in this phase (only the sanitized email body).
+    ai_read_attachments: bool = False
+
     # Outgoing mail
     smtp_host: str = "localhost"
     smtp_port: int = 1025
@@ -83,6 +125,18 @@ class Settings(BaseSettings):
                 f"MAX_UPLOAD_BYTES ({self.max_upload_bytes}) must be <= CLAMAV_STREAM_MAX_BYTES "
                 f"({self.clamav_stream_max_bytes}): larger files could not be scanned by ClamAV"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _inbound_email_and_ai_are_consistent(self) -> "Settings":
+        if self.imap_host and not self.imap_ssl and self.is_production:
+            raise ValueError("IMAP_SSL must be true in production (credentials would travel in clear)")
+        if self.ai_read_attachments:
+            raise ValueError(
+                "AI_READ_ATTACHMENTS is not supported yet: only the email body is sent to the AI"
+            )
+        if self.ai_provider != "none" and not (self.ai_base_url and self.ai_model):
+            raise ValueError("AI_BASE_URL and AI_MODEL are required when AI_PROVIDER is set")
         return self
 
     @model_validator(mode="after")

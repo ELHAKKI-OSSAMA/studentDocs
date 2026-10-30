@@ -87,9 +87,32 @@ docker compose exec backend python -m app.scripts.rescan
 
 Relance l'analyse des fichiers restés en `SCANNING` (le worker le fait aussi à chaque démarrage). Avec `--errors`, les fichiers en `ERROR` sont aussi réanalysés, par exemple après une panne de ClamAV.
 
+## Emails entrants et IA (Phase 4)
+
+Une boîte institutionnelle est relevée en IMAP (lecture seule) par le service `beat` ; chaque email devient un dossier revu par un humain dans `/admin/emails`. L'IA ne fait que proposer : aucune demande n'est jamais créée sans validation humaine.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `IMAP_HOST` / `IMAP_PORT` / `IMAP_SSL` | vide / `993` / `true` | serveur IMAP ; relève désactivée si `IMAP_HOST` est vide ; `IMAP_SSL=false` refusé en production |
+| `IMAP_USERNAME` / `IMAP_PASSWORD` / `IMAP_FOLDER` / `IMAP_ADDRESS` | — / — / `INBOX` / = username | compte relevé (secret dans `.env` uniquement) |
+| `EMAIL_POLL_SECONDS` | `60` | période de relève |
+| `EMAIL_TRUSTED_AUTHSERV_IDS` | `[]` | authserv-id des serveurs de réception dont les `Authentication-Results` sont crus (sinon aucun étudiant n'est identifié automatiquement) |
+| `AI_PROVIDER` | `none` | `none` ou `openai_compatible` ; jamais de bascule vers un autre fournisseur |
+| `AI_BASE_URL` / `AI_MODEL` / `AI_API_KEY` | — | ex. `http://ollama:11434/v1` |
+| `AI_ALLOW_EXTERNAL` | `false` | décision explicite requise pour un fournisseur hors réseau privé |
+| `AI_TIMEOUT_SECONDS` / `AI_JSON_MODE` | `60` / `json_schema` | `json_object` pour les serveurs sans sortie structurée |
+
+`AI_READ_ATTACHMENTS` doit rester `false` : seul le corps de l'email est envoyé au modèle dans cette phase. Avec un modèle local (Ollama, vLLM, LM Studio), aucune donnée ne sort vers Internet ; si ce modèle tombe, les dossiers passent simplement en revue humaine.
+
 ## Tests
 
 Backend : pytest, sur les vrais services Postgres, Redis, S3, ClamAV et Mailpit, avec la base isolée `<POSTGRES_DB>_test` remise à zéro à chaque exécution. Un vrai worker Celery est démarré par la suite de tests sur une file dédiée (`test-documents-…`), que le worker de la stack ne consomme pas. Le scénario antivirus utilise uniquement le fichier de test standard EICAR, assemblé à l'exécution (aucun fichier du dépôt ne contient la signature).
+
+Depuis la Phase 4, les tests utilisent aussi GreenMail (serveur SMTP/IMAP de test) et un serveur LLM de test (HTTP compatible OpenAI, réponses scriptées) : démarrez la stack avec la surcouche de test, qui n'est jamais utilisée en production.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
+```
 
 ```bash
 docker compose exec backend pytest -q
@@ -113,7 +136,7 @@ Frontend, tests de bout en bout (Playwright) contre la stack Docker démarrée :
 cd frontend && npx playwright install chromium && npm run test:e2e
 ```
 
-La suite E2E couvre notamment le cycle complet d'une demande (inscription vérifiée → demande avec justificatif → attribution → demande d'information → réponse → approbation → dépôt du document final → téléchargement → clôture) et les cas refusés (isolation entre étudiants, transitions interdites, permission retirée, motif obligatoire, référence invalide). Le scénario « permission retirée » modifie temporairement `role_permissions` via `docker compose exec postgres psql` et la restaure.
+La suite E2E (stack lancée avec `docker-compose.test.yml`) couvre aussi les emails entrants : email SMTP → relève IMAP → extraction → correction, association, conversion → workflow jusqu'à `COMPLETED` ; réponse `Re: [REQ-…]` rattachée au fil ; pièce EICAR en quarantaine jamais envoyée à l'IA ; injection de prompt sans aucune action automatique. Elle couvre notamment le cycle complet d'une demande (inscription vérifiée → demande avec justificatif → attribution → demande d'information → réponse → approbation → dépôt du document final → téléchargement → clôture) et les cas refusés (isolation entre étudiants, transitions interdites, permission retirée, motif obligatoire, référence invalide). Le scénario « permission retirée » modifie temporairement `role_permissions` via `docker compose exec postgres psql` et la restaure.
 
 Lancer la suite E2E plusieurs fois de suite peut atteindre la limite d'inscriptions par IP (10 par heure par défaut). Augmentez `RATE_LIMIT_REGISTER_PER_IP` dans votre `.env` local si besoin.
 

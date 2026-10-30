@@ -76,7 +76,7 @@ request_status_history(id BIGINT, request_id FK, from_status NULL, to_status, ac
 request_sequences(year INT PK, last_value INT)   -- numérotation atomique : INSERT … ON CONFLICT DO UPDATE … RETURNING
 ```
 
-Index : `(status, created_at)`, `(student_id)`, `(assigned_to_id)`, `(academic_year_id)`, `(branch_id)`. La détection de doublons et le lien `email_case_id` arriveront avec l'intégration email (Phase 4).
+Index : `(status, created_at)`, `(student_id)`, `(assigned_to_id)`, `(academic_year_id)`, `(branch_id)`. Le lien avec un email entrant est porté par `email_cases.linked_request_id` (Phase 4).
 
 ## Messages et fichiers
 
@@ -102,24 +102,33 @@ documents(id, request_id FK, request_item_id FK NULL, message_id FK NULL,
 
 `storage_key` reste interne : l'API ne l'expose jamais. Seul un document `CLEAN` et non supprimé est téléchargeable. La migration `0004_document_scanning` fait passer en `SCANNING` les fichiers stockés avant l'antivirus (`NOT_SCANNED` / `PENDING`) ; le worker les analyse à son démarrage. Les notes internes entre admins et les pièces jointes d'emails viendront avec les phases suivantes.
 
-## Email et IA
+## Email et IA (Phase 4, migration `0005_email_ingestion`)
 
 ```
-email_accounts(id, tenant_id, provider ENUM(IMAP, MS_GRAPH, GMAIL), address, settings_encrypted BYTEA, is_active)
-email_messages(id, account_id FK, message_id_header UNIQUE, provider_uid, in_reply_to NULL,
-               from_address CITEXT, from_name, subject, body_text, received_at, raw_storage_key)
-email_cases(id, tenant_id, email_message_id FK UNIQUE,
-            status ENUM(NEW, AI_PROCESSING, NEEDS_REVIEW, CONVERTED, LINKED, DISMISSED, FAILED, IGNORED),
-            student_id FK NULL,                 -- identifié automatiquement (règles) ou par l'admin
-            identification_method ENUM(SENDER_EMAIL, STUDENT_NUMBER, ADMIN_MANUAL) NULL,
-            linked_request_id FK NULL, flags jsonb,   -- ambiguous, possible_duplicate, injection_suspected…
-            reviewed_by FK NULL, reviewed_at, dismiss_reason NULL)
-ai_extractions(id, email_case_id FK, provider, model, prompt_version, is_local_provider,
-               latency_ms, tokens_in, tokens_out, output jsonb, confidence NUMERIC(4,3),
-               confidence_level ENUM(HIGH, MEDIUM, LOW), rule_violations jsonb, error NULL,
-               human_decision ENUM(CONFIRMED, CORRECTED, REJECTED) NULL, corrected_output jsonb NULL,
-               created_at)
+email_accounts(id, provider CHECK(IMAP|MS_GRAPH|GMAIL), address CITEXT UNIQUE, folder, is_active,
+               uid_validity NULL, last_seen_uid, last_polled_at, last_success_at, last_error_at, last_error)
+               -- identifiants IMAP dans l'environnement uniquement, jamais en base
+email_messages(id, account_id FK RESTRICT, uid_validity, provider_uid, message_id_header NULL,
+               in_reply_to, references_header, from_address CITEXT, from_name, to_addresses JSONB,
+               cc_addresses JSONB, subject, sent_at NULL, received_at, raw_storage_key UNIQUE,
+               raw_sha256, raw_size_bytes CHECK > 0, auth_results JSONB, provider_metadata JSONB, created_at)
+               -- append-only ; UNIQUE(account_id, uid_validity, provider_uid) ;
+               -- UNIQUE partiel (account_id, message_id_header) WHERE NOT NULL ; index from_address, raw_sha256, received_at
+email_cases(id, email_message_id FK UNIQUE, status CHECK(NEW|AI_PROCESSING|NEEDS_REVIEW|CONVERTED|LINKED|DISMISSED|FAILED|IGNORED),
+            student_id FK NULL, identification_method NULL CHECK(INSTITUTIONAL_EMAIL|KNOWN_EMAIL|ADMIN_MANUAL),
+            candidate_students JSONB, detected_reference NULL, linked_request_id FK NULL, flags JSONB,
+            body_text, body_html_sanitized, review_confidence NULL CHECK(LOW|MEDIUM|HIGH), assigned_to_id FK NULL,
+            reviewed_by_id, reviewed_at, dismiss_reason, failure_code, attempts, version, created_at, updated_at)
+            -- CHECK CONVERTED/LINKED ⇒ linked_request_id ; CONVERTED ⇒ student_id ; DISMISSED ⇒ dismiss_reason
+            -- index (status, created_at), student_id, linked_request_id, assigned_to_id, review_confidence
+email_case_reviews(id, email_case_id FK, actor_id FK, decision CHECK(ASSOCIATE_STUDENT|CORRECT|CONVERT|LINK|DISMISS|
+                   IGNORE|REOPEN|RETRY|REEXTRACT|ASSIGN), corrected_output JSONB, comment, created_at)  -- append-only
+ai_extractions(id, email_case_id FK, provider, model, prompt_version, is_local_provider, input_sha256,
+               latency_ms, tokens_in, tokens_out, output JSONB NULL, raw_output_valid, review_score SMALLINT,
+               review_confidence, rule_violations JSONB, error_code NULL, created_at)              -- append-only
 ```
+
+`documents` : `request_id` devient NULL, ajout de `email_case_id` (FK, index), `kind` accepte `EMAIL_ATTACHMENT`, `uploaded_by_id` NULL ; contraintes `ck_documents_owner` (`num_nonnulls(request_id, email_case_id) >= 1`) et `ck_documents_uploader` (seules les pièces d'email n'ont pas d'uploader). Les demandes ne reçoivent pas de colonne : le lien est `email_cases.linked_request_id` (une demande peut recevoir plusieurs emails). Permissions ajoutées : `emails.read`, `emails.read_raw`, `emails.process`, `emails.convert`, `emails.dismiss` (ADMIN et SUPER_ADMIN), `email_accounts.manage` (SUPER_ADMIN). Le downgrade conserve les pièces déjà rattachées à une demande (redevenues `ATTACHMENT`).
 
 ## Notifications et audit
 
@@ -130,7 +139,7 @@ audit_logs(id BIGINT, actor_user_id NULL, action, entity, entity_id, ip INET NUL
            -- append-only (trigger forbid_modification) ; index (entity, entity_id), (created_at), (actor_user_id)
 ```
 
-Actions auditées en Phase 2 et 3 : `REQUEST_CREATED`, `STATUS_CHANGED`, `REQUEST_ASSIGNED`, `DOCUMENT_UPLOADED`, `DOCUMENT_DOWNLOADED`, `MESSAGE_SENT`, `ENROLLMENT_REVIEWED`, puis en Phase 3 `DOCUMENT_SCANNED`, `DOCUMENT_DOWNLOAD_REFUSED`, `DOCUMENT_DELETED`, `DOCUMENT_RESCAN_REQUESTED`.
+Actions auditées en Phase 2 et 3 : `REQUEST_CREATED`, `STATUS_CHANGED`, `REQUEST_ASSIGNED`, `DOCUMENT_UPLOADED`, `DOCUMENT_DOWNLOADED`, `MESSAGE_SENT`, `ENROLLMENT_REVIEWED`, puis en Phase 3 `DOCUMENT_SCANNED`, `DOCUMENT_DOWNLOAD_REFUSED`, `DOCUMENT_DELETED`, `DOCUMENT_RESCAN_REQUESTED`, puis en Phase 4 `EMAIL_RECEIVED`, `EMAIL_DUPLICATE_SKIPPED`, `EMAIL_IGNORED`, `EMAIL_PROCESSED`, `EMAIL_PROCESSING_FAILED`, `EMAIL_POLL_FAILED`, `EMAIL_UIDVALIDITY_RESET`, `EMAIL_STUDENT_PROPOSED`, `EMAIL_STUDENT_ASSOCIATED`, `EMAIL_EXTRACTION_CORRECTED` (noms de champs seulement), `AI_EXTRACTION_CREATED`, `AI_EXTRACTION_FAILED`, `AI_EXTRACTION_REQUESTED`, `EMAIL_CASE_CONVERTED`, `EMAIL_CASE_LINKED`, `EMAIL_CASE_DISMISSED`, `EMAIL_CASE_REOPENED`, `EMAIL_CASE_RETRY`, `EMAIL_CASE_ASSIGNED`, `EMAIL_RAW_DOWNLOADED`, `DOCUMENT_ATTACHED_FROM_EMAIL`. Jamais le corps, le sujet ni les adresses dans `details`.
 
 Prévu pour la Phase 5 :
 

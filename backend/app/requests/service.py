@@ -108,6 +108,65 @@ class RequestService:
         *,
         ip: str | None,
     ) -> Request:
+        """Web submission by the student (multipart form with the supporting documents)."""
+        enrollment, types = await self.validate_new_request(student, data)
+
+        # Supporting documents: enforced here, whatever the client does.
+        files_by_type: dict[uuid.UUID, list] = defaultdict(list)
+        for field_name, file in form.files:
+            if not field_name.startswith(ATTACHMENT_FIELD_PREFIX):
+                raise AppError.of(422, "unexpected_file", "Unexpected file field", {"field": field_name})
+            try:
+                type_id = uuid.UUID(field_name.removeprefix(ATTACHMENT_FIELD_PREFIX))
+            except ValueError as exc:
+                raise AppError.of(
+                    422, "unexpected_file", "Unexpected file field", {"field": field_name}
+                ) from exc
+            if type_id not in types:
+                raise AppError.of(422, "unexpected_file", "File for a document that is not requested")
+            files_by_type[type_id].append(file)
+        self.check_required_attachments(types, {t for t, files in files_by_type.items() if files})
+
+        request = await self.insert_request(
+            student,
+            enrollment,
+            data,
+            source=RequestSource.WEB,
+            actor_id=student.user_id,
+            actor_role=Actor.STUDENT,
+        )
+        uploads = documents.uploads()
+        try:
+            item_by_type = {i.document_type_id: i for i in request.items}
+            for type_id, files in files_by_type.items():
+                for file in files:
+                    doc = await uploads.store(
+                        self.db,
+                        file,
+                        request_id=request.id,
+                        kind=DocumentKind.ATTACHMENT,
+                        uploaded_by=student.user_id,
+                        request_item_id=item_by_type[type_id].id,
+                    )
+                    await self.db.flush()
+                    audit_upload(self.db, doc, actor_id=student.user_id, ip=ip)
+            self.record_created(request, student, actor_id=student.user_id, ip=ip)
+            await self.db.commit()
+        except BaseException:
+            await self.db.rollback()
+            await uploads.rollback()
+            raise
+        # The supporting documents are received, not accepted: they become usable once scanned CLEAN.
+        uploads.dispatch()
+        return await self.get(request.id)
+
+    # --- creation core (shared by the web form and the email conversion) ---------------------------
+
+    async def validate_new_request(
+        self, student: Student, data: RequestCreate
+    ) -> tuple[StudentEnrollment, dict[uuid.UUID, DocumentType]]:
+        """Business rules of a new request: verified enrollment of THIS student, active year and branch,
+        document types active and allowed for the branch category, quantities within the maximum."""
         enrollment = await self.db.scalar(
             select(StudentEnrollment).where(
                 StudentEnrollment.id == data.enrollment_id, StudentEnrollment.student_id == student.id
@@ -149,22 +208,11 @@ class RequestService:
                     "Requested quantity exceeds the allowed maximum",
                     {"document_type_id": str(doc_type.id), "max_quantity": doc_type.max_quantity},
                 )
+        return enrollment, types
 
-        # Supporting documents: enforced here, whatever the client does.
-        files_by_type: dict[uuid.UUID, list] = defaultdict(list)
-        for field_name, file in form.files:
-            if not field_name.startswith(ATTACHMENT_FIELD_PREFIX):
-                raise AppError.of(422, "unexpected_file", "Unexpected file field", {"field": field_name})
-            try:
-                type_id = uuid.UUID(field_name.removeprefix(ATTACHMENT_FIELD_PREFIX))
-            except ValueError as exc:
-                raise AppError.of(
-                    422, "unexpected_file", "Unexpected file field", {"field": field_name}
-                ) from exc
-            if type_id not in types:
-                raise AppError.of(422, "unexpected_file", "File for a document that is not requested")
-            files_by_type[type_id].append(file)
-        missing = [str(t.id) for t in types.values() if t.requires_attachment and not files_by_type[t.id]]
+    @staticmethod
+    def check_required_attachments(types: dict[uuid.UUID, DocumentType], provided: set[uuid.UUID]) -> None:
+        missing = [str(t.id) for t in types.values() if t.requires_attachment and t.id not in provided]
         if missing:
             raise AppError.of(
                 422,
@@ -173,6 +221,17 @@ class RequestService:
                 {"document_type_ids": missing},
             )
 
+    async def insert_request(
+        self,
+        student: Student,
+        enrollment: StudentEnrollment,
+        data: RequestCreate,
+        *,
+        source: RequestSource,
+        actor_id: uuid.UUID,
+        actor_role: str,
+    ) -> Request:
+        """Inserts the request (SUBMITTED by the actor, then RECEIVED by the system). Not committed."""
         now = datetime.now(UTC)
         request = Request(
             reference=await next_reference(self.db, now),
@@ -181,7 +240,7 @@ class RequestService:
             academic_year_id=enrollment.academic_year_id,
             branch_id=enrollment.branch_id,
             study_level_id=enrollment.study_level_id,
-            source=RequestSource.WEB,
+            source=source,
             status=RequestStatus.SUBMITTED,
             reason=data.reason,
             extra_info=data.extra_info,
@@ -193,14 +252,7 @@ class RequestService:
         ]
         self.db.add(request)
         await self.db.flush()
-        add_history(
-            self.db,
-            request,
-            None,
-            RequestStatus.SUBMITTED,
-            actor_id=student.user_id,
-            actor_role=Actor.STUDENT,
-        )
+        add_history(self.db, request, None, RequestStatus.SUBMITTED, actor_id=actor_id, actor_role=actor_role)
         # SUBMITTED → RECEIVED is a system transition performed once everything is persisted.
         request.status = RequestStatus.RECEIVED
         add_history(
@@ -211,40 +263,21 @@ class RequestService:
             actor_id=None,
             actor_role=Actor.SYSTEM,
         )
+        return request
 
-        uploads = documents.uploads()
-        try:
-            item_by_type = {i.document_type_id: i for i in request.items}
-            for type_id, files in files_by_type.items():
-                for file in files:
-                    doc = await uploads.store(
-                        self.db,
-                        file,
-                        request_id=request.id,
-                        kind=DocumentKind.ATTACHMENT,
-                        uploaded_by=student.user_id,
-                        request_item_id=item_by_type[type_id].id,
-                    )
-                    await self.db.flush()
-                    audit_upload(self.db, doc, actor_id=student.user_id, ip=ip)
-            record(
-                self.db,
-                actor_id=student.user_id,
-                action="REQUEST_CREATED",
-                entity="request",
-                entity_id=request.id,
-                ip=ip,
-                details={"reference": request.reference},
-            )
-            NotificationService(self.db).notify(student.user_id, NotificationType.REQUEST_RECEIVED, request)
-            await self.db.commit()
-        except BaseException:
-            await self.db.rollback()
-            await uploads.rollback()
-            raise
-        # The supporting documents are received, not accepted: they become usable once scanned CLEAN.
-        uploads.dispatch()
-        return await self.get(request.id)
+    def record_created(
+        self, request: Request, student: Student, *, actor_id: uuid.UUID, ip: str | None, **extra
+    ) -> None:
+        record(
+            self.db,
+            actor_id=actor_id,
+            action="REQUEST_CREATED",
+            entity="request",
+            entity_id=request.id,
+            ip=ip,
+            details={"reference": request.reference, **extra},
+        )
+        NotificationService(self.db).notify(student.user_id, NotificationType.REQUEST_RECEIVED, request)
 
     # --- queries ------------------------------------------------------------------------------------
 

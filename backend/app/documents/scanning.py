@@ -89,14 +89,15 @@ async def scan_document(
             entity="document",
             entity_id=doc.id,
             details={
-                "request_id": str(doc.request_id),
+                **doc.owner_details(),
                 "result": status.value,
                 "detail": detail,
                 "attempts": doc.scan_attempts,
                 "sha256": doc.sha256,
             },
         )
-        if status != ScanStatus.CLEAN:
+        # Email attachments have no uploader to notify: staff see the status on the email case.
+        if status != ScanStatus.CLEAN and doc.request_id is not None and doc.uploaded_by_id is not None:
             request = await db.get(Request, doc.request_id)
             if request is not None:
                 kind = (

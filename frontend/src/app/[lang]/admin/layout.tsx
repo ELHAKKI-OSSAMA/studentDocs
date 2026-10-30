@@ -30,7 +30,7 @@ const sections: NavSection[] = [
         icon: BadgeCheckIcon,
         permission: "enrollments.verify",
       },
-      { href: "/admin/emails", label: "nav.emails", icon: MailIcon },
+      { href: "/admin/emails", label: "nav.emails", icon: MailIcon, permission: "emails.read" },
       { href: "/admin/students", label: "nav.students", icon: UsersIcon, permission: "students.read" },
     ],
   },
