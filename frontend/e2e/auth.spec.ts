@@ -51,7 +51,7 @@ test("registration with a non-institutional email is refused", async ({ page }) 
   await page.goto("/en/register");
   await page.locator("#first_name").fill("Test");
   await page.locator("#last_name").fill("User");
-  await page.locator("#email").fill(`someone-${Date.now()}@gmail.com`);
+  await page.locator("#email").fill(`someone-${Date.now()}@example.com`);
   await page.locator("#password").fill("E2e-password-2026");
   await page.locator("form button[type=submit]").click();
   await expect(appAlert(page)).toContainText("institutional email");

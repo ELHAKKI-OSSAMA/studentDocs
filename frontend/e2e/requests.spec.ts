@@ -127,19 +127,15 @@ test("full request lifecycle between a student and the administration", async ({
   await expect(byTestId(admin, "transition-error")).toHaveText("Déposez d'abord le document final.");
   await admin.keyboard.press("Escape");
 
-  // 17. Upload of the final document (hidden from the student until it is made available).
-  await admin.getByTestId("issued-input").setInputFiles(pdf("attestation-finale.pdf"));
-  await byTestId(admin, "issued-submit").click();
-  await expect(byTestId(admin, "document-list").locator("[data-kind=ISSUED]")).toContainText("attestation-finale.pdf");
-  // Phase 3: the final document is scanned by ClamAV before it can be delivered (the page polls).
-  await expect(byTestId(admin, "document-list").locator("[data-kind=ISSUED]")).toHaveAttribute("data-scan", "CLEAN", {
-    timeout: 60_000,
-  });
+  // 17-18. The final document is added from the same dialog: uploaded, scanned by ClamAV (Phase 3), then the
+  // request becomes DOCUMENT_AVAILABLE (all items are digital).
   await student.reload();
   await expect(byTestId(student, "document-list").locator("[data-kind=ISSUED]")).toHaveCount(0);
-
-  // 18. DOCUMENT_AVAILABLE (all items are digital).
-  await transition(admin, "DOCUMENT_AVAILABLE");
+  await byTestId(admin, "transition-DOCUMENT_AVAILABLE").click();
+  await byTestId(admin, "transition-issued-input").setInputFiles(pdf("attestation-finale.pdf"));
+  await byTestId(admin, "confirm-transition").click();
+  await expect(headerStatus(admin)).toHaveAttribute("data-status", "DOCUMENT_AVAILABLE", { timeout: 90_000 });
+  await expect(byTestId(admin, "document-list").locator("[data-kind=ISSUED]")).toHaveAttribute("data-scan", "CLEAN");
 
   // 19. The student downloads it through the authorized endpoint.
   await student.goto("/fr/student/documents");

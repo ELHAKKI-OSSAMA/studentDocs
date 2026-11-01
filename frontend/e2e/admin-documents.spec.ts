@@ -90,12 +90,13 @@ test("admin replaces an infected final document with a clean one", async ({ brow
   await expect(infected).toHaveAttribute("data-scan", "INFECTED", { timeout: 60_000 });
   await expect(infected.getByTestId("scan-detail")).toContainText("Eicar");
 
-  // It cannot be delivered.
+  // It cannot be delivered, and the dialog says why.
   await byTestId(admin, "transition-DOCUMENT_AVAILABLE").click();
   await byTestId(admin, "confirm-transition").click();
   await expect(byTestId(admin, "transition-error")).toHaveText(
-    "Le document final n'a pas encore été accepté par l'antivirus.",
+    "Le document final a été rejeté par l'antivirus. Supprimez-le et déposez un autre fichier.",
   );
+  await expect(headerStatus(admin)).toHaveAttribute("data-status", "APPROVED");
   await admin.keyboard.press("Escape");
 
   // Replace: delete the infected file, upload a clean one.

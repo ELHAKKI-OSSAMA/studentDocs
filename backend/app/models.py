@@ -14,6 +14,7 @@ MODEL_MODULES: list[str] = [
     "app.audit.models",
     "app.emails.models",
     "app.ai.models",
+    "app.mailconfig.models",
 ]
 
 

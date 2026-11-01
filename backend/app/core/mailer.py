@@ -3,8 +3,10 @@
 import smtplib
 from dataclasses import asdict, dataclass
 from email.message import EmailMessage
+from typing import TYPE_CHECKING
 
-from app.core.config import Settings
+if TYPE_CHECKING:
+    from app.mailconfig.service import SmtpConfig
 
 
 @dataclass(frozen=True)
@@ -17,17 +19,19 @@ class OutgoingEmail:
         return asdict(self)
 
 
-def send_smtp(settings: Settings, mail: OutgoingEmail) -> None:
+def send_with(config: "SmtpConfig", mail: OutgoingEmail) -> None:
+    """Sends through the given relay (see app.mailconfig.service.effective_config)."""
     msg = EmailMessage()
-    msg["From"] = settings.mail_from
+    msg["From"] = config.mail_from
     msg["To"] = mail.to
     msg["Subject"] = mail.subject
     msg.set_content(mail.text)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.smtp_starttls:
+    smtp_class = smtplib.SMTP_SSL if config.ssl else smtplib.SMTP
+    with smtp_class(config.host, config.port, timeout=15) as smtp:
+        if config.starttls:
             smtp.starttls()
-        if settings.smtp_username and settings.smtp_password:
-            smtp.login(settings.smtp_username, settings.smtp_password.get_secret_value())
+        if config.username and config.password:
+            smtp.login(config.username, config.password)
         smtp.send_message(msg)
 
 

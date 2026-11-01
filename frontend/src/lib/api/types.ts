@@ -55,6 +55,7 @@ export type DocumentType = Timestamps & {
   description_i18n: I18nText | null;
   delivery_mode: "DIGITAL" | "PICKUP";
   requires_attachment: boolean;
+  requires_deposit: boolean;
   max_quantity: number;
   processing_days: number;
   is_active: boolean;
@@ -149,6 +150,7 @@ export type RequestDocumentType = {
   name_i18n: I18nText;
   delivery_mode: DeliveryMode;
   requires_attachment: boolean;
+  requires_deposit: boolean;
 };
 
 export type RequestItem = { id: string; quantity: number; document_type: RequestDocumentType };
@@ -417,3 +419,36 @@ export type EmailCaseDetail = EmailCaseListItem & {
 };
 
 export type StudentDetail = StudentListItem & { enrollments: Enrollment[] };
+
+/** An original kept by the administration; returned_at closes it (history is kept). */
+export type StudentDeposit = {
+  id: string;
+  document_type: { id: string; code: string; name_i18n: I18nText };
+  deposited_on: string;
+  note: string | null;
+  returned_at: string | null;
+  created_at: string;
+};
+
+export type SmtpSecurity = "NONE" | "SSL" | "STARTTLS";
+
+/** Outgoing relay set by a super-admin. The password is write-only: only has_password comes back. */
+export type SmtpSettings = {
+  configured: boolean;
+  is_enabled: boolean;
+  host: string | null;
+  port: number | null;
+  security: SmtpSecurity | null;
+  username: string | null;
+  has_password: boolean;
+  password_readable: boolean;
+  mail_from: string | null;
+  updated_at: string | null;
+  updated_by_name: string | null;
+  active_source: "database" | "environment";
+  environment_host: string;
+  environment_port: number;
+  database_settings_allowed: boolean;
+};
+
+export type SmtpTestResult = { ok: boolean; error: string | null; used_stored_password: boolean };

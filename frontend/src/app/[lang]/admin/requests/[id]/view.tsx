@@ -220,9 +220,13 @@ export function RequestView({ id }: { id: string }) {
                     <CardTitle>{t("requests.studentInfo")}</CardTitle>
                     {data.student && (
                       <CardDescription>
-                        <span className="font-medium text-foreground" data-testid="student-name">
+                        <Link
+                          href={`/${locale}/admin/students/${data.student.id}`}
+                          className="font-medium text-foreground hover:underline"
+                          data-testid="student-name"
+                        >
                           {data.student.first_name} {data.student.last_name}
-                        </span>{" "}
+                        </Link>{" "}
                         · <span dir="ltr">{data.student.email}</span>
                         {data.student.student_number && (
                           <>

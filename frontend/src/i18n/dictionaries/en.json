@@ -103,7 +103,16 @@
     "request_closed": "This request is closed.",
     "retry_not_possible": "This message is too large to be processed.",
     "student_mismatch": "Associate the email with the student of this request first.",
-    "too_many_attachments": "Too many attachments."
+    "too_many_attachments": "Too many attachments.",
+    "document_not_deposited": "This original was not deposited with the administration, so it cannot be requested.",
+    "deposit_exists": "This original is already recorded as deposited.",
+    "deposit_returned": "This original has already been returned.",
+    "invalid_date": "Invalid date.",
+    "smtp_authentication_failed": "The SMTP server rejected the login (wrong username or app password).",
+    "smtp_address_refused": "The SMTP server refused the sender or the recipient.",
+    "smtp_timeout": "The SMTP server is not responding (timeout).",
+    "smtp_connection_failed": "Cannot connect to the SMTP server (wrong host, port or security).",
+    "smtp_password_required": "A password is required with a username."
   },
   "home": {
     "title": "Your administrative documents, made simple",
@@ -238,7 +247,9 @@
     "allowedCategories": "Allowed categories",
     "allowedCategoriesHint": "No selection: available to every category.",
     "codeHint": "Uppercase letters, digits and _; cannot be changed later.",
-    "categoryFixed": "The category cannot be changed after creation."
+    "categoryFixed": "The category cannot be changed after creation.",
+    "requiresDeposit": "Withdrawal of a deposited original",
+    "requiresDepositHint": "Only students who deposited this original with the administration can request it."
   },
   "users": {
     "title": "Users",
@@ -261,7 +272,13 @@
     "title": "Students",
     "searchPlaceholder": "Name, email or student number…",
     "enrollments": "Enrollments",
-    "registeredAt": "Registered on"
+    "registeredAt": "Registered on",
+    "backToList": "Back to students",
+    "profile": "Profile",
+    "studentRequests": "Request history",
+    "studentDocuments": "Documents",
+    "noRequests": "No requests for this student.",
+    "request": "Request"
   },
   "settings": {
     "title": "Settings",
@@ -401,7 +418,11 @@
     "new": "New",
     "allCategories": "All categories",
     "submittedAt": "Submitted on",
-    "kindEMAIL_ATTACHMENT": "Attachment received by email"
+    "kindEMAIL_ATTACHMENT": "Attachment received by email",
+    "issuedInDialogHint": "Add the final document here: it is scanned by the antivirus, then the request changes status.",
+    "uploading": "Uploading…",
+    "issuedRejected": "The final document was rejected by the antivirus. Remove it and upload another file.",
+    "issuedStillScanning": "The antivirus scan is not finished yet. Try again in a moment."
   },
   "notifications": {
     "title": "Notifications",
@@ -629,5 +650,46 @@
     "RETRY": "Processing retried",
     "REEXTRACT": "AI run again",
     "ASSIGN": "Assignment"
+  },
+  "deposits": {
+    "title": "Deposited originals",
+    "hint": "Original documents kept by the administration. The student can only request to withdraw these.",
+    "add": "Record a deposit",
+    "documentType": "Document",
+    "date": "Deposit date",
+    "note": "Note",
+    "held": "Held",
+    "returnedOn": "Returned on {date}",
+    "return": "Mark as returned",
+    "none": "No original deposited.",
+    "noTypes": "No \"withdrawal of an original\" document type is configured.",
+    "recorded": "Deposit recorded.",
+    "returned": "Original marked as returned.",
+    "depositedOn": "Original deposited on {date}"
+  },
+  "smtp": {
+    "title": "Outgoing mail server (SMTP)",
+    "description": "Relay used for every email sent by the platform. When disabled, the .env relay is used ({host}).",
+    "activeDatabase": "Active: this configuration",
+    "activeEnvironment": "Active: .env configuration",
+    "enabled": "Use this configuration",
+    "host": "SMTP server",
+    "port": "Port",
+    "security": "Security",
+    "securityNone": "None (local network)",
+    "username": "Username",
+    "password": "Password",
+    "passwordKeep": "A password is stored (encrypted). Leave empty to keep it.",
+    "clearPassword": "Remove the stored password",
+    "passwordUnreadable": "The stored password can no longer be decrypted (secret key changed). Enter it again.",
+    "mailFrom": "Sender address",
+    "mailFromHint": "With Gmail, it must be the signed-in account's address.",
+    "testTo": "Send a test email to",
+    "test": "Send test",
+    "testing": "Sending…",
+    "testOk": "Test email sent to {to}. Check the inbox (and spam).",
+    "saved": "SMTP configuration saved.",
+    "updated": "Updated on {date} by {name}",
+    "databaseDisabled": "Test environment: this configuration is kept but ignored; emails go through the .env relay."
   }
 }

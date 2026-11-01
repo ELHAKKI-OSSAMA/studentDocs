@@ -56,6 +56,15 @@ def _test_settings(**overrides) -> Settings:
         "rate_limit_login_per_ip": 1000,
         "rate_limit_register_per_ip": 1000,
         "scan_queue": SCAN_QUEUE,
+        # Outgoing mail always goes to Mailpit in tests, whatever relay .env configures.
+        "smtp_host": "mailpit",
+        "smtp_port": 1025,
+        "smtp_username": None,
+        "smtp_password": None,
+        "smtp_ssl": False,
+        # The super-admin relay is exercised against the isolated test database.
+        "smtp_use_database_settings": True,
+        "smtp_starttls": False,
         "scan_max_retries": 1,
         "scan_retry_base_seconds": 1,
         # Inbound email: GreenMail, plain IMAP (test server only); one mailbox per test (imap_username).

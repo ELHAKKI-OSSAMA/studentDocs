@@ -1,12 +1,12 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.academic.models import AcademicYear, Branch, StudyLevel
+from app.academic.models import AcademicYear, Branch, DocumentType, StudyLevel
 from app.core.db import Base, Timestamps, UUIDPrimaryKey, str_enum
 from app.users.models import User
 
@@ -79,3 +79,38 @@ class StudentEnrollment(UUIDPrimaryKey, Timestamps, Base):
     branch: Mapped[Branch] = relationship(lazy="joined")
     study_level: Mapped[StudyLevel] = relationship(lazy="joined")
     reviewed_by: Mapped[User | None] = relationship(lazy="joined", foreign_keys=[reviewed_by_id])
+
+
+class StudentDeposit(UUIDPrimaryKey, Timestamps, Base):
+    """An original kept by the administration (baccalaureate, transcript…). Recorded by staff, never by the
+    student. Returning it closes the deposit instead of deleting it, so the history is kept."""
+
+    __tablename__ = "student_deposits"
+    __table_args__ = (
+        # At most one open deposit per student and document type.
+        Index(
+            "uq_student_deposits_open",
+            "student_id",
+            "document_type_id",
+            unique=True,
+            postgresql_where=text("returned_at IS NULL"),
+        ),
+    )
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_type_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("document_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    deposited_on: Mapped[date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    returned_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    document_type: Mapped[DocumentType] = relationship(lazy="joined")

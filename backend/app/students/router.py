@@ -7,8 +7,12 @@ from app.auth.dependencies import Requires
 from app.auth.permissions import Perm
 from app.core.crud import Page, PageParams
 from app.core.deps import ClientIp, DbSession
+from app.requests.schemas import DocumentOut, IssuedDocumentOut
+from app.requests.service import RequestService
 from app.students.models import EnrollmentStatus
 from app.students.schemas import (
+    DepositIn,
+    DepositOut,
     EnrollmentIn,
     EnrollmentOut,
     EnrollmentReview,
@@ -25,6 +29,9 @@ enrollments_admin_router = APIRouter(prefix="/api/v1/admin/enrollments", tags=["
 EnrollmentOwner = Requires(Perm.ENROLLMENT_SELF)
 StudentsReader = Requires(Perm.ADMIN_ACCESS, Perm.STUDENTS_READ)
 EnrollmentReviewer = Requires(Perm.ADMIN_ACCESS, Perm.ENROLLMENTS_VERIFY)
+StudentsManager = Requires(Perm.ADMIN_ACCESS, Perm.STUDENTS_MANAGE)
+StudentFilesReader = Requires(Perm.ADMIN_ACCESS, Perm.STUDENTS_READ, Perm.REQUESTS_READ)
+DepositReader = Requires(Perm.REQUEST_CREATE)
 
 
 @router.get("/enrollments", response_model=list[EnrollmentOut])
@@ -49,6 +56,14 @@ async def remove_my_enrollment(enrollment_id: uuid.UUID, db: DbSession, current:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/deposits", response_model=list[DepositOut])
+async def my_deposits(db: DbSession, current: DepositReader):
+    """Originals the administration currently holds for me: the only ones I can ask to withdraw."""
+    service = StudentService(db)
+    student = await service.for_user(current.id)
+    return await service.deposits(student.id, only_open=True)
+
+
 @admin_router.get("", response_model=Page[StudentListItem])
 async def list_students(
     db: DbSession,
@@ -71,6 +86,41 @@ async def get_student(student_id: uuid.UUID, db: DbSession, _: StudentsReader):
         **to_list_item(student).model_dump(),
         enrollments=[EnrollmentOut.model_validate(e) for e in enrollments],
     )
+
+
+@admin_router.get("/{student_id}/documents", response_model=list[IssuedDocumentOut])
+async def student_documents(student_id: uuid.UUID, db: DbSession, _: StudentFilesReader):
+    """Every file of the student's requests. Downloads go through the request document endpoint."""
+    student = await StudentService(db).get(student_id)
+    rows = await RequestService(db).documents_for_staff(student.id)
+    return [
+        IssuedDocumentOut(
+            **DocumentOut.of(doc, staff=True).model_dump(), request_id=req.id, reference=req.reference
+        )
+        for doc, req in rows
+    ]
+
+
+@admin_router.get("/{student_id}/deposits", response_model=list[DepositOut])
+async def student_deposits(student_id: uuid.UUID, db: DbSession, _: StudentsReader):
+    service = StudentService(db)
+    return await service.deposits((await service.get(student_id)).id)
+
+
+@admin_router.post("/{student_id}/deposits", response_model=DepositOut, status_code=status.HTTP_201_CREATED)
+async def record_deposit(
+    student_id: uuid.UUID, data: DepositIn, db: DbSession, current: StudentsManager, ip: ClientIp
+):
+    service = StudentService(db)
+    student = await service.get(student_id)
+    return await service.add_deposit(student.id, data, current.user, ip)
+
+
+@admin_router.post("/{student_id}/deposits/{deposit_id}/return", response_model=DepositOut)
+async def return_deposit(
+    student_id: uuid.UUID, deposit_id: uuid.UUID, db: DbSession, current: StudentsManager, ip: ClientIp
+):
+    return await StudentService(db).return_deposit(student_id, deposit_id, current.user, ip)
 
 
 def _review_item(e) -> EnrollmentReviewItem:

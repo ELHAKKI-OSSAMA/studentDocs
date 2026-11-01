@@ -17,8 +17,14 @@ x-backend-env: &backend-env
   FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
   # Only the Caddy entry point (fixed IP) may set X-Forwarded-For.
   TRUSTED_PROXIES: '["172.30.0.10/32"]'
-  SMTP_HOST: mailpit
-  SMTP_PORT: "1025"
+  # Outgoing mail: Mailpit by default (never leaves the machine); a real relay is configured in .env.
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_SSL: ${SMTP_SSL:-false}
+  SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+  SMTP_USE_DATABASE_SETTINGS: ${SMTP_USE_DATABASE_SETTINGS:-true}
   MAIL_FROM: ${MAIL_FROM:-StudentDocs <no-reply@studentdocs.local>}
   MAILPIT_API_URL: http://mailpit:8025
   SEED_STUDENT_EMAIL_DOMAIN: ${SEED_STUDENT_EMAIL_DOMAIN:-etu.univ-demo.ma}

@@ -22,6 +22,7 @@ function docType(id: string, overrides: Partial<DocumentType> = {}): DocumentTyp
     description_i18n: null,
     delivery_mode: "DIGITAL",
     requires_attachment: false,
+    requires_deposit: false,
     max_quantity: 3,
     processing_days: 2,
     is_active: true,

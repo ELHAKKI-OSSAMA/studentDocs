@@ -22,6 +22,17 @@ x-test-env: &test-env
   AI_TIMEOUT_SECONDS: "10"
   GREENMAIL_HOST: greenmail
   LLM_TEST_SERVER_URL: http://llm-test:8080
+  # Tests read outgoing mail in Mailpit: never through a real relay configured in .env.
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  SMTP_USERNAME: ""
+  SMTP_PASSWORD: ""
+  SMTP_SSL: "false"
+  SMTP_STARTTLS: "false"
+  # The super-admin relay saved in the shared database must not catch the E2E emails.
+  SMTP_USE_DATABASE_SETTINGS: "false"
+  # The E2E scenarios reuse the demo student: consecutive runs must not hit the hourly request quota.
+  RATE_LIMIT_REQUEST_CREATE_PER_HOUR: "1000"
 
 services:
   greenmail:

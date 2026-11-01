@@ -38,6 +38,7 @@ function docType(id: string, name: string, overrides: Partial<DocumentType> = {}
     description_i18n: null,
     delivery_mode: "DIGITAL",
     requires_attachment: false,
+    requires_deposit: false,
     max_quantity: 3,
     processing_days: 2,
     is_active: true,
@@ -53,10 +54,11 @@ const TYPES = [
   docType("convention", "Convention de stage", { requires_attachment: true, max_quantity: 1 }),
 ];
 
-function setup(enrollments: Enrollment[]) {
+function setup(enrollments: Enrollment[], types: DocumentType[] = TYPES, deposits: unknown[] = []) {
   const { fetchMock, calls } = stubFetch([
     { path: "/api/v1/students/me/enrollments", body: enrollments },
-    { path: "/api/v1/catalog/document-types", body: TYPES },
+    { path: "/api/v1/students/me/deposits", body: deposits },
+    { path: "/api/v1/catalog/document-types", body: types },
     {
       method: "POST",
       path: "/api/v1/requests",
@@ -99,6 +101,25 @@ describe("New request form", () => {
     const values = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
     expect(values).toEqual(["", "ok"]);
     expect(screen.getByText(/1 inscription\(s\) en attente de vérification/)).toBeTruthy();
+  });
+
+  it("offers the withdrawal of an original only when the administration holds it", async () => {
+    const held = docType("bac", "Retrait du baccalauréat", { requires_deposit: true });
+    const notHeld = docType("releve", "Retrait du relevé original", { requires_deposit: true });
+    const deposit = {
+      id: "dep-1",
+      document_type: { id: "bac", code: "bac", name_i18n: { fr: "Retrait du baccalauréat" } },
+      deposited_on: "2022-09-15",
+      note: null,
+      returned_at: null,
+      created_at: "",
+    };
+    setup([enrollment("ok", "VERIFIED", "2026-2027")], [...TYPES, held, notHeld], [deposit]);
+    await chooseEnrollment("ok");
+    await waitFor(() => expect(screen.queryByText("Retrait du baccalauréat")).toBeTruthy());
+    expect(screen.queryByText("Retrait du relevé original")).toBeNull();
+    expect(screen.getByTestId("deposit-info").textContent).toContain("2022");
+    expect(screen.getAllByTestId("document-choice")).toHaveLength(3);
   });
 
   it("explains what to do when no enrollment is verified", async () => {

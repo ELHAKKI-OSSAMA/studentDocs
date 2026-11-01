@@ -5,7 +5,7 @@ import uuid
 from celery.signals import worker_ready
 
 from app.core.config import get_settings
-from app.core.mailer import OutgoingEmail, send_smtp
+from app.core.mailer import OutgoingEmail, send_with
 from app.documents.scanning import ScanOutcome
 from app.worker.celery_app import celery_app
 from app.worker.context import worker_context
@@ -27,7 +27,9 @@ def ping() -> str:
     max_retries=8,
 )
 def send_email(mail: dict) -> None:
-    send_smtp(get_settings(), OutgoingEmail(**mail))
+    # The relay is read at send time: a super-admin change applies to the next email without a restart.
+    config = asyncio.run(worker_context().smtp_config())
+    send_with(config, OutgoingEmail(**mail))
 
 
 @celery_app.task(

@@ -81,6 +81,7 @@ class DocumentTypeRef(_Ref):
     name_i18n: I18nText
     delivery_mode: DeliveryMode
     requires_attachment: bool
+    requires_deposit: bool
 
 
 class ItemOut(_Ref):

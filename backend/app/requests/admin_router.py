@@ -52,6 +52,7 @@ async def list_requests(
     branch_id: uuid.UUID | None = None,
     category_id: uuid.UUID | None = None,
     assigned: Annotated[str | None, Query(max_length=36, description="me | unassigned | <user id>")] = None,
+    student_id: uuid.UUID | None = None,
 ):
     service = RequestService(db)
     rows, total = await service.list_for_staff(
@@ -63,6 +64,7 @@ async def list_requests(
         category_id=category_id,
         assigned=assigned,
         current_user_id=current.id,
+        student_id=student_id,
     )
     unread = await service.unread_counts([r.id for r in rows], AuthorSide.STAFF)
     return Page(

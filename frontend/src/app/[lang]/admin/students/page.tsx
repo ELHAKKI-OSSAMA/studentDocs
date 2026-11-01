@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useDeferredValue, useState } from "react";
 import { SearchIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +60,13 @@ export default function StudentsPage() {
                     {list.data.items.map((s) => (
                       <TableRow key={s.id}>
                         <TableCell className="font-medium">
-                          {s.first_name} {s.last_name}
+                          <Link
+                            href={`/${locale}/admin/students/${s.id}`}
+                            className="hover:underline"
+                            data-testid="student-link"
+                          >
+                            {s.first_name} {s.last_name}
+                          </Link>
                         </TableCell>
                         <TableCell dir="ltr" className="text-start">{s.email}</TableCell>
                         <TableCell>{s.student_number ?? "—"}</TableCell>

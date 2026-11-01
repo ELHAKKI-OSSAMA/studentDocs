@@ -40,7 +40,7 @@ from app.requests.schemas import (
     StudentInfo,
 )
 from app.requests.workflow import Actor, allowed_targets
-from app.students.models import EnrollmentStatus, Student, StudentEnrollment
+from app.students.models import EnrollmentStatus, Student, StudentDeposit, StudentEnrollment
 from app.users.models import User
 
 ATTACHMENT_FIELD_PREFIX = "attachment:"
@@ -208,6 +208,28 @@ class RequestService:
                     "Requested quantity exceeds the allowed maximum",
                     {"document_type_id": str(doc_type.id), "max_quantity": doc_type.max_quantity},
                 )
+        # Withdrawal of an original: only what this student actually deposited (and was not returned yet).
+        deposit_types = [t.id for t in types.values() if t.requires_deposit]
+        if deposit_types:
+            deposited = set(
+                (
+                    await self.db.scalars(
+                        select(StudentDeposit.document_type_id).where(
+                            StudentDeposit.student_id == student.id,
+                            StudentDeposit.document_type_id.in_(deposit_types),
+                            StudentDeposit.returned_at.is_(None),
+                        )
+                    )
+                ).all()
+            )
+            for type_id in deposit_types:
+                if type_id not in deposited:
+                    raise AppError.of(
+                        422,
+                        "document_not_deposited",
+                        "This original was not deposited with the administration",
+                        {"document_type_id": str(type_id)},
+                    )
         return enrollment, types
 
     @staticmethod
@@ -314,8 +336,11 @@ class RequestService:
         category_id: uuid.UUID | None,
         assigned: str | None,
         current_user_id: uuid.UUID,
+        student_id: uuid.UUID | None = None,
     ):
         stmt = self._base()
+        if student_id:
+            stmt = stmt.where(Request.student_id == student_id)
         if status:
             stmt = stmt.where(Request.status == status)
         if academic_year_id:
@@ -382,6 +407,16 @@ class RequestService:
                 Document.deleted_at.is_(None),
                 Request.status.in_(DOCUMENTS_VISIBLE_TO_STUDENT),
             )
+            .order_by(Document.created_at.desc())
+        )
+        return [(d, r) for d, r in rows.unique().all()]
+
+    async def documents_for_staff(self, student_id: uuid.UUID) -> list[tuple[Document, Request]]:
+        """Every file of every request of the student (supporting, issued, message, email attachments)."""
+        rows = await self.db.execute(
+            select(Document, Request)
+            .join(Request, Document.request_id == Request.id)
+            .where(Request.student_id == student_id, Document.deleted_at.is_(None))
             .order_by(Document.created_at.desc())
         )
         return [(d, r) for d, r in rows.unique().all()]

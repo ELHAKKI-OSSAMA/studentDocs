@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: SecretStr | None = None
     smtp_starttls: bool = False
+    # Implicit TLS (port 465). Exclusive with smtp_starttls (port 587).
+    smtp_ssl: bool = False
+    # False: the super-admin relay (smtp_settings) is ignored and the .env relay always used (test stacks).
+    smtp_use_database_settings: bool = True
     mail_from: str = "StudentDocs <no-reply@studentdocs.local>"
 
     @model_validator(mode="after")

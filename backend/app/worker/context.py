@@ -19,6 +19,7 @@ from app.emails.imap import ImapProvider
 from app.emails.ingestion import IngestionService, PollResult
 from app.emails.processing import EmailProcessor, ProcessOutcome, mark_failed
 from app.emails.provider import EmailProvider
+from app.mailconfig.service import SmtpConfig, effective_config
 from app.models import load_all_models
 
 # The worker does not import the API routers: register every mapper explicitly (foreign keys).
@@ -56,6 +57,14 @@ class WorkerContext:
         # One engine per task run: each run has its own event loop (asyncio.run), no pooling across loops.
         engine = create_async_engine(self.settings.database_url, poolclass=NullPool)
         return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+    async def smtp_config(self) -> SmtpConfig:
+        engine, sessionmaker = self._sessionmaker()
+        try:
+            async with sessionmaker() as db:
+                return await effective_config(db, self.settings)
+        finally:
+            await engine.dispose()
 
     async def scan(self, document_id: uuid.UUID, *, final_attempt: bool) -> ScanOutcome:
         engine, maker = self._sessionmaker()

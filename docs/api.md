@@ -59,6 +59,8 @@ Document object (in request details, message attachments and issued-document lis
 
 New enrollments are `PENDING` until an administrator verifies them.
 
+`GET /students/me/deposits` (`request.create`) lists the originals the administration currently holds for the student. A document type with `requires_deposit` can only be requested when one of these is open; otherwise the request fails with `422 document_not_deposited`.
+
 ## Student requests `/requests` — `request.create` / `request.read_own`
 
 Another student's request (or document, or message thread) always answers `404`.
@@ -86,13 +88,19 @@ Another student's request (or document, or message thread) always answers `404`.
 |---|---|---|
 | GET | `/admin/dashboard` | `dashboard.read` |
 | GET | `/admin/students?q=` · `/admin/students/{id}` | `students.read` |
+| GET | `/admin/students/{id}/documents` (every file of the student's requests, with the request reference; download through the request endpoint) | `students.read` + `requests.read` |
+| GET | `/admin/students/{id}/deposits` (open and returned) | `students.read` |
+| POST | `/admin/students/{id}/deposits` `{document_type_id, deposited_on, note?}` (type must have `requires_deposit`; no future date; `409 deposit_exists` if already open) | `students.manage` |
+| POST | `/admin/students/{id}/deposits/{deposit_id}/return` (`409 deposit_returned` if already returned) | `students.manage` |
 | GET | `/admin/users?role=&q=` | `users.read` |
 | POST | `/admin/users` (creates ADMIN / SUPER_ADMIN) | `users.manage` |
 | PATCH | `/admin/users/{id}` (`is_active`, `role`; never yourself; at least one active super-admin) | `users.manage` |
 | GET / POST / DELETE | `/admin/settings/email-domains[/{id}]` | `settings.manage` |
+| GET / PUT | `/admin/settings/smtp` `{is_enabled, host, port, security: NONE\|SSL\|STARTTLS, username?, password?, clear_password?, mail_from}` — outgoing relay (single row). The password is stored encrypted (Fernet, key derived from `SECRET_KEY`) and never returned (`has_password` only); disabled or absent, the `.env` relay is used (`active_source`). Read by the worker at each send. Ignored when `SMTP_USE_DATABASE_SETTINGS=false` (set by `docker-compose.test.yml`, so E2E mail always reaches Mailpit). Audited without the password. | `settings.manage` |
+| POST | `/admin/settings/smtp/test` (same body + `to`): sends one email with the typed configuration, the stored password when none is typed; returns `{ok, error: smtp_authentication_failed\|smtp_address_refused\|smtp_timeout\|smtp_connection_failed}` | `settings.manage` |
 | GET | `/admin/enrollments?status=&q=` (with reviewer name and date) | `enrollments.verify` |
 | PATCH | `/admin/enrollments/{id}` `{status: VERIFIED\|REJECTED, review_note?, academic_year_id?, branch_id?, study_level_id?}` (rejection requires a note) | `enrollments.verify` |
-| GET | `/admin/requests?status=&q=&academic_year_id=&branch_id=&category_id=&assigned=me\|unassigned\|<id>` | `requests.read` |
+| GET | `/admin/requests?status=&q=&academic_year_id=&branch_id=&category_id=&assigned=me\|unassigned\|<id>&student_id=` | `requests.read` |
 | GET | `/admin/requests/assignees` | `requests.assign` |
 | GET | `/admin/requests/{id}` | `requests.read` |
 | POST | `/admin/requests/{id}/transitions` `{to_status, comment?}` (state machine; comment required for `NEEDS_INFORMATION`, `REJECTED`, `CANCELLED`) | per transition: `requests.process`, `requests.approve`, `requests.reject` |

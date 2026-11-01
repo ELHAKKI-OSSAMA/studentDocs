@@ -10,6 +10,7 @@ class Perm(enum.StrEnum):
     ADMIN_ACCESS = "admin.access"
     DASHBOARD_READ = "dashboard.read"
     STUDENTS_READ = "students.read"
+    STUDENTS_MANAGE = "students.manage"
     USERS_READ = "users.read"
     CATALOG_MANAGE = "catalog.manage"
     USERS_MANAGE = "users.manage"

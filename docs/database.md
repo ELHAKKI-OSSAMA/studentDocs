@@ -54,6 +54,13 @@ student_enrollments(id, student_id FK CASCADE, academic_year_id FK RESTRICT, bra
                     source CHECK (SELF_DECLARED | ADMIN | IMPORT) DEFAULT SELF_DECLARED,
                     reviewed_by_id FK users SET NULL, reviewed_at, review_note)   -- index (status)
 -- Pas de table `admins` : le rôle et les permissions suffisent (ajout si des attributs propres apparaissent).
+student_deposits(id, student_id FK CASCADE, document_type_id FK RESTRICT, deposited_on DATE, note,
+                 recorded_by_id FK users SET NULL, returned_at NULL, returned_by_id FK users SET NULL)
+-- migration 0006 : originaux conservés par l'administration (bac, relevés…). Index unique partiel
+-- (student_id, document_type_id) WHERE returned_at IS NULL : un seul dépôt ouvert par type. Rendre un
+-- original ferme le dépôt (returned_at) sans le supprimer : l'historique est conservé.
+-- document_types.requires_deposit : un tel type (ex. RETRAIT_BAC) n'est demandable que par un étudiant
+-- ayant un dépôt ouvert de ce type (vérifié côté serveur, web et conversion d'email).
 ```
 
 ## Demandes (migration `0003_requests_workflow`)
@@ -145,6 +152,14 @@ Prévu pour la Phase 5 :
 
 ```
 notification_deliveries(id, notification_id FK, channel (IN_APP | EMAIL), status, attempts, last_error, sent_at)
+```
+
+## Paramètres d'envoi (migration `0007_smtp_settings`)
+
+```
+smtp_settings(id SMALLINT CHECK (id = 1), is_enabled, host, port CHECK 1..65535,
+              security CHECK (NONE | SSL | STARTTLS), username, password_encrypted (Fernet), mail_from,
+              updated_by_id FK users SET NULL)   -- une seule ligne ; absente ou désactivée : relais du .env
 ```
 
 ## Migrations

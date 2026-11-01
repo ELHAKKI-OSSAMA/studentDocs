@@ -17,16 +17,18 @@ import { useI18n } from "@/i18n/client";
 import { localized } from "@/i18n/translate";
 import { api } from "@/lib/api/client";
 import { useApiQuery, useInvalidate } from "@/lib/api/hooks";
-import type { DocumentType, Enrollment, RequestDetail } from "@/lib/api/types";
+import type { DocumentType, Enrollment, RequestDetail, StudentDeposit } from "@/lib/api/types";
 import { errorMessage } from "@/lib/errors";
 import { buildRequestForm, validateDraft, type Selection } from "@/lib/requests";
 
 function DocumentChoice({
   type,
+  deposit,
   value,
   onChange,
 }: {
   type: DocumentType;
+  deposit?: StudentDeposit;
   value: Selection[string] | undefined;
   onChange: (value: Selection[string] | undefined) => void;
 }) {
@@ -53,6 +55,13 @@ function DocumentChoice({
           <span>{t(`requests.delivery${type.delivery_mode}`)}</span>
           <span>{t("requests.processingDays", { n: type.processing_days })}</span>
           <span>{t("requests.maxQuantity", { n: type.max_quantity })}</span>
+          {deposit && (
+            <span className="font-medium" data-testid="deposit-info">
+              {t("deposits.depositedOn", {
+                date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(deposit.deposited_on)),
+              })}
+            </span>
+          )}
           {type.requires_attachment && (
             <span className="font-medium text-amber-700 dark:text-amber-400">{t("requests.attachmentRequired")}</span>
           )}
@@ -131,6 +140,17 @@ export default function NewRequestPage() {
     "/catalog/document-types",
     { category_id: enrollment?.branch.category.id },
     { enabled: !!enrollment },
+  );
+  const deposits = useApiQuery<StudentDeposit[]>("/students/me/deposits");
+  const depositByType = useMemo(
+    () => new Map((deposits.data ?? []).map((d) => [d.document_type.id, d])),
+    [deposits.data],
+  );
+  // Withdrawal of an original: offered only when the administration holds it for this student
+  // (the server enforces the same rule).
+  const offered = useMemo(
+    () => (types.data ?? []).filter((type) => !type.requires_deposit || depositByType.has(type.id)),
+    [types.data, depositByType],
   );
   const [selection, setSelection] = useState<Selection>({});
   const [reason, setReason] = useState("");
@@ -240,12 +260,13 @@ export default function NewRequestPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <QueryState isPending={types.isPending} error={types.error} onRetry={() => types.refetch()}>
-                    {types.data?.length ? (
+                    {offered.length ? (
                       <ul className="space-y-3">
-                        {types.data.map((type) => (
+                        {offered.map((type) => (
                           <DocumentChoice
                             key={type.id}
                             type={type}
+                            deposit={depositByType.get(type.id)}
                             value={selection[type.id]}
                             onChange={(value) =>
                               setSelection((prev) => {

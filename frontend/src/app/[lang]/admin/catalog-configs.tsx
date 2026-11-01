@@ -128,6 +128,7 @@ export function DocumentTypesPage() {
       { name: "max_quantity", label: "catalog.maxQuantity", kind: "number", min: 1, max: 10 },
       { name: "processing_days", label: "catalog.processingDays", kind: "number", min: 0, max: 90 },
       { name: "requires_attachment", label: "catalog.requiresAttachment", kind: "checkbox" },
+      { name: "requires_deposit", label: "catalog.requiresDeposit", kind: "checkbox", hint: "catalog.requiresDepositHint" },
       { name: "allowed_category_ids", label: "catalog.allowedCategories", kind: "categories", hint: "catalog.allowedCategoriesHint" },
       { name: "is_active", label: "catalog.isActive", kind: "checkbox" },
     ],

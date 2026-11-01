@@ -166,9 +166,11 @@ export default function AdminRequestsPage() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <p className="font-medium">
-                            {r.student?.first_name} {r.student?.last_name}
-                          </p>
+                          {r.student && (
+                            <Link href={`/${locale}/admin/students/${r.student.id}`} className="font-medium hover:underline">
+                              {r.student.first_name} {r.student.last_name}
+                            </Link>
+                          )}
                           <p className="text-xs text-muted-foreground" dir="ltr">
                             {r.student?.student_number ?? r.student?.email}
                           </p>

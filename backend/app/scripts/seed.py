@@ -26,7 +26,7 @@ from app.core.config import get_settings
 from app.core.db import create_engine, create_sessionmaker
 from app.core.logging import configure_logging
 from app.core.security import hash_password
-from app.students.models import EnrollmentSource, EnrollmentStatus, Student, StudentEnrollment
+from app.students.models import EnrollmentSource, EnrollmentStatus, Student, StudentDeposit, StudentEnrollment
 from app.users.models import AllowedEmailDomain, AuthIdentity, IdentityProvider, Role, User
 
 logger = logging.getLogger("seed")
@@ -153,8 +153,23 @@ DOCUMENT_TYPES = [
         5,
         ["FORMATION_CONTINUE"],
     ),
+    (
+        "RETRAIT_BAC",
+        t(
+            "Retrait du baccalauréat (original)",
+            "Withdrawal of the baccalaureate (original)",
+            "سحب شهادة البكالوريا (الأصل)",
+        ),
+        DeliveryMode.PICKUP,
+        False,
+        1,
+        5,
+        [],
+    ),
     ("AUTRE", t("Autre document", "Other document", "وثيقة أخرى"), DeliveryMode.DIGITAL, False, 1, 10, []),
 ]
+# Withdrawal of an original kept by the administration: requestable only by a student who deposited it.
+DEPOSIT_TYPES = {"RETRAIT_BAC"}
 
 
 async def _upsert(db: AsyncSession, model, where: dict, values: dict):
@@ -233,6 +248,7 @@ async def seed(db: AsyncSession, *, student_domain: str, demo_password: str | No
                 "name_i18n": name,
                 "delivery_mode": delivery,
                 "requires_attachment": attachment,
+                "requires_deposit": code in DEPOSIT_TYPES,
                 "max_quantity": max_qty,
                 "processing_days": days,
                 "is_active": True,
@@ -265,6 +281,17 @@ async def seed(db: AsyncSession, *, student_domain: str, demo_password: str | No
                 "source": EnrollmentSource.ADMIN,
             },
         )
+        # The demo student deposited their baccalaureate at registration: they may ask to withdraw it.
+        bac = await db.scalar(select(DocumentType).where(DocumentType.code == "RETRAIT_BAC"))
+        has_bac = await db.scalar(
+            select(StudentDeposit.id).where(
+                StudentDeposit.student_id == student.id, StudentDeposit.document_type_id == bac.id
+            )
+        )
+        if has_bac is None:
+            db.add(
+                StudentDeposit(student_id=student.id, document_type_id=bac.id, deposited_on=date(2022, 9, 15))
+            )
     await db.commit()
 
 

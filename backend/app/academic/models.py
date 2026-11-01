@@ -127,6 +127,11 @@ class DocumentType(UUIDPrimaryKey, Timestamps, Base):
         str_enum(DeliveryMode, "delivery_mode"), nullable=False, default=DeliveryMode.DIGITAL
     )
     requires_attachment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Withdrawal of an original kept by the administration (e.g. the baccalaureate): only a student with an
+    # active deposit of this type may request it.
+    requires_deposit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     max_quantity: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     processing_days: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

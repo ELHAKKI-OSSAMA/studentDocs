@@ -166,6 +166,7 @@ class DocumentTypeIn(BaseModel):
     description_i18n: I18nText | None = None
     delivery_mode: DeliveryMode = DeliveryMode.DIGITAL
     requires_attachment: bool = False
+    requires_deposit: bool = False
     max_quantity: int = Field(default=1, ge=1, le=10)
     processing_days: int = Field(default=3, ge=0, le=90)
     is_active: bool = True
@@ -179,6 +180,7 @@ class DocumentTypeUpdate(BaseModel):
     description_i18n: I18nText | None = None
     delivery_mode: DeliveryMode | None = None
     requires_attachment: bool | None = None
+    requires_deposit: bool | None = None
     max_quantity: int | None = Field(default=None, ge=1, le=10)
     processing_days: int | None = Field(default=None, ge=0, le=90)
     is_active: bool | None = None
@@ -191,6 +193,7 @@ class DocumentTypeOut(_Out):
     description_i18n: I18nText | None
     delivery_mode: DeliveryMode
     requires_attachment: bool
+    requires_deposit: bool
     max_quantity: int
     processing_days: int
     is_active: bool

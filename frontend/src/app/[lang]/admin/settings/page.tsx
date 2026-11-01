@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EmptyState, PageHeader, QueryState } from "@/components/page";
+import { SmtpSettingsCard } from "@/components/smtp-settings";
 import { useI18n } from "@/i18n/client";
 import { useApiMutation, useApiQuery } from "@/lib/api/hooks";
 import type { EmailDomain } from "@/lib/api/types";
@@ -36,6 +37,9 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title={t("settings.title")} />
+      <div className="mb-6">
+        <SmtpSettingsCard />
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>{t("settings.domainsTitle")}</CardTitle>

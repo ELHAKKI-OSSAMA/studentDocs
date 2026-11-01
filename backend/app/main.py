@@ -22,6 +22,7 @@ from app.documents.service import DocumentPipeline
 from app.documents.storage import ObjectStorage
 from app.emails.cases import celery_email_queue
 from app.emails.router import router as admin_emails_router
+from app.mailconfig.router import router as smtp_settings_router
 from app.notifications.router import router as notifications_router
 from app.requests.admin_router import router as admin_requests_router
 from app.requests.router import router as requests_router
@@ -81,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         requests_router,
         admin_requests_router,
         admin_emails_router,
+        smtp_settings_router,
         notifications_router,
     ):
         app.include_router(router)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -81,3 +81,30 @@ class EnrollmentReviewItem(EnrollmentOut):
     student_email: str
     student_number: str | None
     reviewer_name: str | None
+
+
+# --- deposited originals --------------------------------------------------------------------------
+
+
+class DepositIn(BaseModel):
+    document_type_id: uuid.UUID
+    deposited_on: date
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class _DocumentTypeRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    code: str
+    name_i18n: I18nText
+
+
+class DepositOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    document_type: _DocumentTypeRef
+    deposited_on: date
+    note: str | None
+    returned_at: datetime | None
+    created_at: datetime

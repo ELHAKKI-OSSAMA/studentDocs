@@ -1,15 +1,21 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.academic.models import AcademicYear, AcademicYearStatus, Branch, StudyLevel
+from app.academic.models import AcademicYear, AcademicYearStatus, Branch, DocumentType, StudyLevel
 from app.audit.service import record
 from app.core.crud import PageParams, commit_or_conflict, paginate
 from app.core.errors import AppError, NotFoundError
-from app.students.models import EnrollmentSource, EnrollmentStatus, Student, StudentEnrollment
-from app.students.schemas import EnrollmentIn, EnrollmentReview, StudentListItem
+from app.students.models import (
+    EnrollmentSource,
+    EnrollmentStatus,
+    Student,
+    StudentDeposit,
+    StudentEnrollment,
+)
+from app.students.schemas import DepositIn, EnrollmentIn, EnrollmentReview, StudentListItem
 from app.users.models import User
 
 MAX_ENROLLMENTS_PER_STUDENT = 20
@@ -193,3 +199,85 @@ class StudentService:
         )
         await commit_or_conflict(self.db)
         return await self.db.get(StudentEnrollment, enrollment.id, populate_existing=True)
+
+    # --- deposited originals (recorded by staff; returning closes the deposit, history is kept) -----
+
+    async def deposits(self, student_id: uuid.UUID, *, only_open: bool = False) -> list[StudentDeposit]:
+        stmt = (
+            select(StudentDeposit)
+            .where(StudentDeposit.student_id == student_id)
+            .order_by(StudentDeposit.returned_at.is_not(None), StudentDeposit.deposited_on.desc())
+        )
+        if only_open:
+            stmt = stmt.where(StudentDeposit.returned_at.is_(None))
+        return list((await self.db.scalars(stmt)).unique().all())
+
+    async def add_deposit(
+        self, student_id: uuid.UUID, data: DepositIn, actor: User, ip: str | None
+    ) -> StudentDeposit:
+        doc_type = await self.db.get(DocumentType, data.document_type_id)
+        if doc_type is None or not doc_type.requires_deposit:
+            raise AppError.of(
+                422,
+                "invalid_reference",
+                "Unknown document type, or not one that is deposited",
+                {"field": "document_type_id"},
+            )
+        if data.deposited_on > date.today():
+            raise AppError.of(422, "invalid_date", "The deposit date cannot be in the future")
+        already_open = await self.db.scalar(
+            select(StudentDeposit.id).where(
+                StudentDeposit.student_id == student_id,
+                StudentDeposit.document_type_id == doc_type.id,
+                StudentDeposit.returned_at.is_(None),
+            )
+        )
+        if already_open:
+            raise AppError.of(409, "deposit_exists", "This original is already recorded as deposited")
+        deposit = StudentDeposit(
+            id=uuid.uuid4(),
+            student_id=student_id,
+            document_type_id=doc_type.id,
+            deposited_on=data.deposited_on,
+            note=(data.note or "").strip() or None,
+            recorded_by_id=actor.id,
+        )
+        self.db.add(deposit)
+        record(
+            self.db,
+            actor_id=actor.id,
+            action="DEPOSIT_RECORDED",
+            entity="student",
+            entity_id=student_id,
+            ip=ip,
+            details={"deposit_id": str(deposit.id), "document_type": doc_type.code},
+        )
+        # A concurrent second open deposit violates uq_student_deposits_open → 409.
+        await commit_or_conflict(self.db)
+        return await self.db.get(StudentDeposit, deposit.id, populate_existing=True)
+
+    async def return_deposit(
+        self, student_id: uuid.UUID, deposit_id: uuid.UUID, actor: User, ip: str | None
+    ) -> StudentDeposit:
+        deposit = await self.db.scalar(
+            select(StudentDeposit).where(
+                StudentDeposit.id == deposit_id, StudentDeposit.student_id == student_id
+            )
+        )
+        if deposit is None:
+            raise NotFoundError("Deposit not found")
+        if deposit.returned_at is not None:
+            raise AppError.of(409, "deposit_returned", "This original has already been returned")
+        deposit.returned_at = datetime.now(UTC)
+        deposit.returned_by_id = actor.id
+        record(
+            self.db,
+            actor_id=actor.id,
+            action="DEPOSIT_RETURNED",
+            entity="student",
+            entity_id=student_id,
+            ip=ip,
+            details={"deposit_id": str(deposit.id), "document_type": deposit.document_type.code},
+        )
+        await commit_or_conflict(self.db)
+        return await self.db.get(StudentDeposit, deposit.id, populate_existing=True)

@@ -103,7 +103,16 @@
     "request_closed": "Cette demande est clôturée.",
     "retry_not_possible": "Ce message est trop volumineux pour être traité.",
     "student_mismatch": "Associez d'abord l'email à l'étudiant de cette demande.",
-    "too_many_attachments": "Trop de pièces jointes."
+    "too_many_attachments": "Trop de pièces jointes.",
+    "document_not_deposited": "Cet original n'a pas été déposé auprès de l'administration : il ne peut pas être demandé.",
+    "deposit_exists": "Cet original est déjà enregistré comme déposé.",
+    "deposit_returned": "Cet original a déjà été rendu.",
+    "invalid_date": "Date invalide.",
+    "smtp_authentication_failed": "Authentification refusée par le serveur SMTP (identifiant ou mot de passe d'application incorrect).",
+    "smtp_address_refused": "Le serveur SMTP a refusé l'expéditeur ou le destinataire.",
+    "smtp_timeout": "Le serveur SMTP ne répond pas (délai dépassé).",
+    "smtp_connection_failed": "Connexion au serveur SMTP impossible (hôte, port ou sécurité incorrects).",
+    "smtp_password_required": "Un mot de passe est requis avec un identifiant."
   },
   "home": {
     "title": "Vos documents administratifs, simplement",
@@ -238,7 +247,9 @@
     "allowedCategories": "Catégories autorisées",
     "allowedCategoriesHint": "Aucune sélection : disponible pour toutes les catégories.",
     "codeHint": "Majuscules, chiffres et _ ; non modifiable ensuite.",
-    "categoryFixed": "La catégorie ne peut plus être modifiée après création."
+    "categoryFixed": "La catégorie ne peut plus être modifiée après création.",
+    "requiresDeposit": "Retrait d'un original déposé",
+    "requiresDepositHint": "Seuls les étudiants ayant déposé cet original auprès de l'administration peuvent le demander."
   },
   "users": {
     "title": "Utilisateurs",
@@ -261,7 +272,13 @@
     "title": "Étudiants",
     "searchPlaceholder": "Nom, email ou numéro étudiant…",
     "enrollments": "Inscriptions",
-    "registeredAt": "Inscrit le"
+    "registeredAt": "Inscrit le",
+    "backToList": "Retour aux étudiants",
+    "profile": "Profil",
+    "studentRequests": "Historique des demandes",
+    "studentDocuments": "Documents",
+    "noRequests": "Aucune demande pour cet étudiant.",
+    "request": "Demande"
   },
   "settings": {
     "title": "Paramètres",
@@ -401,7 +418,11 @@
     "new": "Nouveau",
     "allCategories": "Toutes les catégories",
     "submittedAt": "Envoyée le",
-    "kindEMAIL_ATTACHMENT": "Pièce jointe reçue par email"
+    "kindEMAIL_ATTACHMENT": "Pièce jointe reçue par email",
+    "issuedInDialogHint": "Ajoutez le document final ici : il sera analysé par l'antivirus, puis la demande changera de statut.",
+    "uploading": "Envoi du fichier…",
+    "issuedRejected": "Le document final a été rejeté par l'antivirus. Supprimez-le et déposez un autre fichier.",
+    "issuedStillScanning": "L'analyse antivirus n'est pas terminée. Réessayez dans un instant."
   },
   "notifications": {
     "title": "Notifications",
@@ -629,5 +650,46 @@
     "RETRY": "Traitement relancé",
     "REEXTRACT": "IA relancée",
     "ASSIGN": "Attribution"
+  },
+  "deposits": {
+    "title": "Originaux déposés",
+    "hint": "Documents originaux conservés par l'administration. L'étudiant ne peut demander que le retrait de ceux-ci.",
+    "add": "Enregistrer un dépôt",
+    "documentType": "Document",
+    "date": "Date de dépôt",
+    "note": "Note",
+    "held": "Détenu",
+    "returnedOn": "Rendu le {date}",
+    "return": "Marquer comme rendu",
+    "none": "Aucun original déposé.",
+    "noTypes": "Aucun type de document « retrait d'original » n'est configuré.",
+    "recorded": "Dépôt enregistré.",
+    "returned": "Original marqué comme rendu.",
+    "depositedOn": "Original déposé le {date}"
+  },
+  "smtp": {
+    "title": "Serveur d'envoi (SMTP)",
+    "description": "Relais utilisé pour tous les emails envoyés par la plateforme. Désactivé : le relais du fichier .env est utilisé ({host}).",
+    "activeDatabase": "Actif : cette configuration",
+    "activeEnvironment": "Actif : configuration .env",
+    "enabled": "Utiliser cette configuration",
+    "host": "Serveur SMTP",
+    "port": "Port",
+    "security": "Sécurité",
+    "securityNone": "Aucune (réseau local)",
+    "username": "Identifiant",
+    "password": "Mot de passe",
+    "passwordKeep": "Un mot de passe est enregistré (chiffré). Laissez vide pour le conserver.",
+    "clearPassword": "Supprimer le mot de passe enregistré",
+    "passwordUnreadable": "Le mot de passe enregistré ne peut plus être déchiffré (clé secrète modifiée). Saisissez-le à nouveau.",
+    "mailFrom": "Adresse d'expédition",
+    "mailFromHint": "Avec Gmail, ce doit être l'adresse du compte connecté.",
+    "testTo": "Envoyer un email de test à",
+    "test": "Tester l'envoi",
+    "testing": "Envoi en cours…",
+    "testOk": "Email de test envoyé à {to}. Vérifiez la boîte de réception (et les spams).",
+    "saved": "Configuration SMTP enregistrée.",
+    "updated": "Modifié le {date} par {name}",
+    "databaseDisabled": "Environnement de test : cette configuration est conservée mais ignorée, les emails passent par le relais du fichier .env."
   }
 }
