@@ -2,11 +2,11 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends, Request
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clientip import client_ip
 from app.core.config import Settings
+from app.core.ephemeral import EphemeralStore
 from app.core.ratelimit import RateLimiter
 from app.documents.service import DocumentPipeline
 from app.documents.storage import ObjectStorage
@@ -21,12 +21,12 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def get_redis(request: Request) -> Redis:
-    return request.app.state.redis
+def get_ephemeral(request: Request) -> EphemeralStore:
+    return request.app.state.ephemeral
 
 
 def get_rate_limiter(request: Request) -> RateLimiter:
-    return RateLimiter(request.app.state.redis, request.app.state.settings.redis_key_prefix)
+    return RateLimiter(request.app.state.ephemeral, request.app.state.settings.redis_key_prefix)
 
 
 def get_storage(request: Request) -> ObjectStorage:
@@ -43,7 +43,7 @@ def get_client_ip(request: Request) -> str:
 
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-RedisDep = Annotated[Redis, Depends(get_redis)]
+EphemeralDep = Annotated[EphemeralStore, Depends(get_ephemeral)]
 RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 ClientIp = Annotated[str, Depends(get_client_ip)]
 StorageDep = Annotated[ObjectStorage, Depends(get_storage)]

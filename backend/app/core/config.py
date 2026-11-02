@@ -20,13 +20,29 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
 
     database_url: str
+    # "null": no connection pool (serverless: one short-lived process per request, e.g. Vercel + Supabase).
+    db_pool: Literal["queue", "null"] = "queue"
     redis_url: str = "redis://localhost:6379/0"
+
+    # Runtime profile. The Docker stack uses the defaults; a serverless deployment (Vercel) has no Redis,
+    # no Celery worker and no ClamAV daemon:
+    # - task_mode "inline": emails are sent during the request (no queue);
+    # - ephemeral_store "postgres": rate-limit counters and revoked tokens live in the database;
+    # - antivirus "none": no scan; files are accepted after the type / size / signature checks only.
+    task_mode: Literal["celery", "inline"] = "celery"
+    ephemeral_store: Literal["redis", "postgres"] = "redis"
+    antivirus: Literal["clamav", "none"] = "clamav"
+    # Behind the Next.js proxy: every request must carry this secret (direct calls are refused) and the
+    # client IP is read from the proxy's X-StudentDocs-Client-IP header.
+    proxy_shared_secret: SecretStr | None = None
 
     s3_endpoint_url: str | None = None
     s3_region: str = "us-east-1"
     s3_access_key: SecretStr
     s3_secret_key: SecretStr
     s3_bucket: str = "studentdocs"
+    # Path-style URLs (endpoint/bucket/key), required by Supabase Storage's S3 endpoint.
+    s3_force_path_style: bool = False
 
     # Public URL of the web app, used in links sent by email.
     frontend_url: str = "http://localhost:3000"
@@ -124,7 +140,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _upload_limit_fits_the_antivirus(self) -> "Settings":
         # Refuse to start rather than accept files that would all end in ERROR (never scannable).
-        if self.max_upload_bytes > self.clamav_stream_max_bytes:
+        if self.antivirus == "clamav" and self.max_upload_bytes > self.clamav_stream_max_bytes:
             raise ValueError(
                 f"MAX_UPLOAD_BYTES ({self.max_upload_bytes}) must be <= CLAMAV_STREAM_MAX_BYTES "
                 f"({self.clamav_stream_max_bytes}): larger files could not be scanned by ClamAV"
@@ -152,6 +168,16 @@ class Settings(BaseSettings):
                     "SECRET_KEY looks like a placeholder; generate a random value for production"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _serverless_profile_is_consistent(self) -> "Settings":
+        if self.task_mode == "inline" and (self.imap_host or self.ai_provider != "none"):
+            raise ValueError("Inbound email and AI extraction need the Celery worker (TASK_MODE=celery)")
+        return self
+
+    @property
+    def uses_redis(self) -> bool:
+        return self.ephemeral_store == "redis" or self.task_mode == "celery"
 
     @property
     def is_production(self) -> bool:

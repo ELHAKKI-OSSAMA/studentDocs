@@ -8,7 +8,7 @@ import os
 import random
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import httpx
@@ -168,12 +168,16 @@ class Harness:
     """A running app plus helpers to create clients (one cookie jar per simulated browser)."""
 
     app: FastAPI
+    # Added to every client (e.g. the Next.js proxy secret in the serverless profile).
+    headers: dict[str, str] = field(default_factory=dict)
 
     def client(self, ip: str | None = None) -> AsyncClient:
+        ip = ip or random_ip()
         return ReusableClient(
             transport=ASGITransport(app=self.app),
             base_url="http://testserver",
-            headers={"X-Forwarded-For": ip or random_ip()},
+            # X-StudentDocs-Client-IP is only read behind the authenticated proxy (app.core.proxy).
+            headers={"X-Forwarded-For": ip, "X-StudentDocs-Client-IP": ip, **self.headers},
         )
 
     async def db(self):

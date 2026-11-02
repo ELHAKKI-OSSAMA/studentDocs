@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
-from redis.asyncio import Redis
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +12,9 @@ from app.auth.dependencies import revoked_jti_key
 from app.auth.emails import verification_email
 from app.auth.schemas import RegisterIn
 from app.core.config import Settings
+from app.core.ephemeral import EphemeralStore
 from app.core.errors import AppError, ConflictError
-from app.core.mailer import queue_email
+from app.core.mailer import deliver_email
 from app.core.ratelimit import RateLimitedError, RateLimiter
 from app.core.security import (
     create_access_token,
@@ -76,11 +76,13 @@ async def revoke_all_sessions(db: AsyncSession, user: User) -> None:
 
 
 class AuthService:
-    def __init__(self, db: AsyncSession, settings: Settings, limiter: RateLimiter, redis: Redis) -> None:
+    def __init__(
+        self, db: AsyncSession, settings: Settings, limiter: RateLimiter, ephemeral: EphemeralStore
+    ) -> None:
         self.db = db
         self.settings = settings
         self.limiter = limiter
-        self.redis = redis
+        self.ephemeral = ephemeral
 
     # --- registration -------------------------------------------------------------------------
 
@@ -109,14 +111,16 @@ class AuthService:
         )
         await self.db.commit()
         link = f"{self.settings.frontend_url}/{user.locale.value}/verify-email?{urlencode({'token': token})}"
-        queue_email(
+        await deliver_email(
+            self.db,
+            self.settings,
             verification_email(
                 to=user.email,
                 name=user.first_name,
                 locale=user.locale,
                 link=link,
                 ttl_seconds=self.settings.email_verification_ttl_seconds,
-            )
+            ),
         )
 
     async def register(self, data: RegisterIn, ip: str) -> None:
@@ -297,8 +301,8 @@ class AuthService:
         if access_claims:
             ttl = int(access_claims["exp"] - _now().timestamp())
             if ttl > 0:
-                await self.redis.set(
-                    revoked_jti_key(self.settings.redis_key_prefix, access_claims["jti"]), "1", ex=ttl
+                await self.ephemeral.set_flag(
+                    revoked_jti_key(self.settings.redis_key_prefix, access_claims["jti"]), ttl
                 )
 
     async def logout_everywhere(self, user: User) -> None:

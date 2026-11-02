@@ -23,7 +23,7 @@ from app.auth.schemas import (
     TokenIn,
 )
 from app.auth.service import AuthService, SessionTokens
-from app.core.deps import ClientIp, DbSession, RateLimiterDep, RedisDep, SettingsDep
+from app.core.deps import ClientIp, DbSession, EphemeralDep, RateLimiterDep, SettingsDep
 from app.core.errors import AppError
 from app.core.security import decode_access_token
 from app.students.models import Student
@@ -33,9 +33,9 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 def get_auth_service(
-    db: DbSession, settings: SettingsDep, limiter: RateLimiterDep, redis: RedisDep
+    db: DbSession, settings: SettingsDep, limiter: RateLimiterDep, ephemeral: EphemeralDep
 ) -> AuthService:
-    return AuthService(db, settings, limiter, redis)
+    return AuthService(db, settings, limiter, ephemeral)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]

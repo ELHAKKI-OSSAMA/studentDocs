@@ -1,7 +1,7 @@
 """Idempotent development seed: catalog, allowed domain and (optionally) demo accounts.
 
 Usage: python -m app.scripts.seed
-Demo accounts are created only when SEED_DEMO_PASSWORD is set. Refuses to run in production.
+Demo accounts are created only when SEED_DEMO_PASSWORD is set, and never in production (catalog only).
 """
 
 import asyncio
@@ -298,17 +298,19 @@ async def seed(db: AsyncSession, *, student_domain: str, demo_password: str | No
 async def main() -> int:
     settings = get_settings()
     configure_logging(settings.log_level)
-    if settings.is_production:
-        logger.error("Refusing to seed demo data in production")
+    demo_password = os.environ.get("SEED_DEMO_PASSWORD") or None
+    if settings.is_production and demo_password:
+        logger.error("Refusing to create demo accounts in production: unset SEED_DEMO_PASSWORD")
         return 1
-    engine = create_engine(settings.database_url)
+    student_domain = os.environ.get("SEED_STUDENT_EMAIL_DOMAIN", "")
+    if settings.is_production and not student_domain:
+        logger.error("SEED_STUDENT_EMAIL_DOMAIN is required in production (institutional domain)")
+        return 1
+    engine = create_engine(settings.database_url, null_pool=settings.db_pool == "null")
     try:
         async with create_sessionmaker(engine)() as db:
-            await seed(
-                db,
-                student_domain=os.environ.get("SEED_STUDENT_EMAIL_DOMAIN", "etu.univ-demo.ma"),
-                demo_password=os.environ.get("SEED_DEMO_PASSWORD") or None,
-            )
+            # In production: reference catalog and institutional domain only, never demo accounts.
+            await seed(db, student_domain=student_domain or "etu.univ-demo.ma", demo_password=demo_password)
     finally:
         await engine.dispose()
     logger.info("Seed completed")

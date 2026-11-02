@@ -20,12 +20,7 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  // In `next dev` (no Caddy in front), forward API calls to the local backend.
-  async rewrites() {
-    if (process.env.NODE_ENV === "production") return [];
-    const backend = process.env.BACKEND_INTERNAL_URL ?? "http://localhost:8000";
-    return [{ source: "/api/v1/:path*", destination: `${backend}/api/v1/:path*` }];
-  },
+  // /api/v1/* is served by the proxy route (src/app/api/v1/[...path]/route.ts) when Caddy is not in front.
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

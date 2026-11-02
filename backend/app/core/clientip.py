@@ -11,6 +11,14 @@ def _networks(trusted: tuple[str, ...]) -> tuple[ipaddress.IPv4Network | ipaddre
 
 def client_ip(request: Request, trusted_proxies: list[str]) -> str:
     """Client IP; X-Forwarded-For is honoured only when the direct peer is a trusted proxy."""
+    if getattr(request.state, "proxied", False):
+        # Authenticated Next.js proxy (app.core.proxy): it forwards the IP seen by the platform's edge.
+        from app.core.proxy import CLIENT_IP_HEADER
+
+        try:
+            return str(ipaddress.ip_address(request.headers.get(CLIENT_IP_HEADER, "").strip()))
+        except ValueError:
+            return "unknown"
     peer = request.client.host if request.client else "unknown"
     try:
         peer_addr = ipaddress.ip_address(peer)

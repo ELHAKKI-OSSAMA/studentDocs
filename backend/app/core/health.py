@@ -52,15 +52,18 @@ async def live() -> dict[str, str]:
 @router.get("/ready")
 async def ready(request: Request) -> JSONResponse:
     state = request.app.state
-    results = dict(
-        await asyncio.gather(
-            _run("database", check_database(state.engine)),
-            _run("redis", check_redis(state.redis)),
-            _run("storage", check_storage(state.s3, state.settings.s3_bucket)),
-            # Uploads keep working without ClamAV (files wait in SCANNING), but the system is degraded.
-            _run("antivirus", check_antivirus(state.settings.clamav_host, state.settings.clamav_port)),
-        )
-    )
+    settings = state.settings
+    checks = [
+        _run("database", check_database(state.engine)),
+        _run("storage", check_storage(state.s3, settings.s3_bucket)),
+    ]
+    # Only the services this deployment uses (the serverless profile has neither Redis nor ClamAV).
+    if state.redis is not None:
+        checks.append(_run("redis", check_redis(state.redis)))
+    if settings.antivirus == "clamav":
+        # Uploads keep working without ClamAV (files wait in SCANNING), but the system is degraded.
+        checks.append(_run("antivirus", check_antivirus(settings.clamav_host, settings.clamav_port)))
+    results = dict(await asyncio.gather(*checks))
     healthy = all(results.values())
     return JSONResponse(
         {

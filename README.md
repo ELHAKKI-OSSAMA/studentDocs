@@ -104,6 +104,13 @@ Une boîte institutionnelle est relevée en IMAP (lecture seule) par le service 
 
 `AI_READ_ATTACHMENTS` doit rester `false` : seul le corps de l'email est envoyé au modèle dans cette phase. Avec un modèle local (Ollama, vLLM, LM Studio), aucune donnée ne sort vers Internet ; si ce modèle tombe, les dossiers passent simplement en revue humaine.
 
+## Production (Vercel + Supabase + Brevo)
+
+Procédure complète : [docs/deployment.md](docs/deployment.md). Le même code tourne en « profil serverless »
+(`TASK_MODE=inline`, `EPHEMERAL_STORE=postgres`, `ANTIVIRUS=none`) : pas de Redis, pas de worker Celery, pas de
+ClamAV ; la réception d'emails et l'IA y sont désactivées, et les fichiers sont limités à 4 Mo. Les variables à
+renseigner dans Vercel sont listées dans `deploy/backend.env.example` et `deploy/frontend.env.example`.
+
 ## Tests
 
 Backend : pytest, sur les vrais services Postgres, Redis, S3, ClamAV et Mailpit, avec la base isolée `<POSTGRES_DB>_test` remise à zéro à chaque exécution. Un vrai worker Celery est démarré par la suite de tests sur une file dédiée (`test-documents-…`), que le worker de la stack ne consomme pas. Le scénario antivirus utilise uniquement le fichier de test standard EICAR, assemblé à l'exécution (aucun fichier du dépôt ne contient la signature).

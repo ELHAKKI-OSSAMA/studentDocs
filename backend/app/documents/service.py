@@ -22,9 +22,10 @@ class PendingUploads:
       run before the row exists, and a rolled-back upload must never be scanned).
     """
 
-    def __init__(self, storage: ObjectStorage, queue: ScanQueue | None) -> None:
+    def __init__(self, storage: ObjectStorage, queue: ScanQueue | None, *, antivirus: bool = True) -> None:
         self.storage = storage
         self.queue = queue
+        self.antivirus = antivirus
         self.keys: list[str] = []
         self.documents: list[Document] = []
 
@@ -67,6 +68,12 @@ class PendingUploads:
             scan_status=ScanStatus.SCANNING,
             uploaded_by_id=uploaded_by,
         )
+        if not self.antivirus:
+            # ANTIVIRUS=none (deployment without ClamAV): accepted on the type / size / signature checks
+            # alone. The reason is recorded so these files can be rescanned if an antivirus is added later.
+            doc.scan_status = ScanStatus.CLEAN
+            doc.scan_detail = "antivirus_disabled"
+            doc.scanned_at = datetime.now(UTC)
         db.add(doc)
         self.documents.append(doc)
         return doc
@@ -77,7 +84,7 @@ class PendingUploads:
         self.documents.clear()
 
     def dispatch(self) -> None:
-        if self.queue is not None:
+        if self.queue is not None and self.antivirus:
             self.queue.enqueue([d.id for d in self.documents])
 
 
@@ -199,9 +206,10 @@ def soft_delete(db: AsyncSession, doc: Document, *, actor_id: uuid.UUID, ip: str
 class DocumentPipeline:
     """Private storage + antivirus queue, shared by every upload path (student, admin, messages)."""
 
-    def __init__(self, storage: ObjectStorage, queue: ScanQueue | None) -> None:
+    def __init__(self, storage: ObjectStorage, queue: ScanQueue | None, *, antivirus: bool = True) -> None:
         self.storage = storage
         self.queue = queue
+        self.antivirus = antivirus
 
     def uploads(self) -> PendingUploads:
-        return PendingUploads(self.storage, self.queue)
+        return PendingUploads(self.storage, self.queue, antivirus=self.antivirus)

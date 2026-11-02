@@ -6,7 +6,8 @@ import type { TranslationKey } from "@/i18n/translate";
 import type { DocumentType, RequestStatus, ScanStatus } from "@/lib/api/types";
 
 /** Mirrors the backend upload policy (app/core/config.py + app/documents/validation.py). */
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+// Must match the backend's MAX_UPLOAD_BYTES (Vercel: 4 MB, its request body limit is 4.5 MB).
+export const MAX_UPLOAD_BYTES = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_BYTES ?? 10 * 1024 * 1024);
 export const ALLOWED_MIME_TYPES = ["application/pdf", "image/png", "image/jpeg"] as const;
 export const FILE_ACCEPT = ".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg";
 

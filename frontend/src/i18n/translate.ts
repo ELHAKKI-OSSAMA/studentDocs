@@ -21,13 +21,16 @@ export function lookup(dict: Dictionary, key: string): string | undefined {
   return typeof node === "string" ? node : undefined;
 }
 
+// Upload limit shown in texts ({maxUploadMb}); same source as MAX_UPLOAD_BYTES in lib/requests.ts.
+const DEFAULT_PARAMS = {
+  maxUploadMb: Math.floor(Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_BYTES ?? 10 * 1024 * 1024) / (1024 * 1024)),
+};
+
 export function createT(dict: Dictionary): TFunction {
   return (key, params) => {
     const template = lookup(dict, key) ?? key;
-    if (!params) return template;
-    return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-      name in params ? String(params[name]) : match,
-    );
+    const values: Record<string, string | number> = { ...DEFAULT_PARAMS, ...params };
+    return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
   };
 }
 

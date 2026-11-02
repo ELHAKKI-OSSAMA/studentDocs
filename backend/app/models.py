@@ -15,6 +15,7 @@ MODEL_MODULES: list[str] = [
     "app.emails.models",
     "app.ai.models",
     "app.mailconfig.models",
+    "app.core.ephemeral",
 ]
 
 

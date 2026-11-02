@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Enum, MetaData, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.pool import NullPool
 
 # Deterministic constraint names so Alembic autogenerate produces stable migrations.
 NAMING_CONVENTION = {
@@ -50,7 +51,10 @@ def str_enum(enum_cls: type[enum.Enum], name: str) -> Enum:
     )
 
 
-def create_engine(database_url: str) -> AsyncEngine:
+def create_engine(database_url: str, *, null_pool: bool = False) -> AsyncEngine:
+    if null_pool:
+        # Serverless: no pool survives between invocations; Supabase's pooler does the pooling.
+        return create_async_engine(database_url, poolclass=NullPool)
     return create_async_engine(database_url, pool_pre_ping=True, pool_size=10, max_overflow=10)
 
 

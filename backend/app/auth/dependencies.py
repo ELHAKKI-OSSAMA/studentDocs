@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.auth.cookies import ACCESS_COOKIE
 from app.auth.permissions import Perm
-from app.core.deps import DbSession, RedisDep, SettingsDep
+from app.core.deps import DbSession, EphemeralDep, SettingsDep
 from app.core.errors import AppError, PermissionDeniedError
 from app.core.security import decode_access_token
 from app.users.models import RolePermission, User
@@ -41,13 +41,13 @@ async def load_permissions(db: DbSession, user: User) -> frozenset[str]:
 
 
 async def get_current_user(
-    request: Request, db: DbSession, settings: SettingsDep, redis: RedisDep
+    request: Request, db: DbSession, settings: SettingsDep, ephemeral: EphemeralDep
 ) -> CurrentUser:
     token = request.cookies.get(ACCESS_COOKIE)
     claims = decode_access_token(token, settings.secret_key.get_secret_value()) if token else None
     if claims is None:
         raise NotAuthenticatedError("Authentication required")
-    if await redis.exists(revoked_jti_key(settings.redis_key_prefix, claims["jti"])):
+    if await ephemeral.has_flag(revoked_jti_key(settings.redis_key_prefix, claims["jti"])):
         raise NotAuthenticatedError("Session has ended")
     try:
         user = await db.get(User, uuid.UUID(claims["sub"]))
