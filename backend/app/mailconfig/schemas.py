@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.mailconfig.models import SmtpSecurity
 
@@ -32,6 +32,13 @@ class SmtpSettingsIn(BaseModel):
         if "\r" in v or "\n" in v:
             raise ValueError("invalid sender")
         return v
+
+    @model_validator(mode="after")
+    def _password_needs_a_username(self) -> "SmtpSettingsIn":
+        # A password without a username is never used (no SMTP login): the relay would refuse every email.
+        if self.password and not self.username:
+            raise ValueError("a username is required with a password")
+        return self
 
 
 class SmtpTestIn(SmtpSettingsIn):

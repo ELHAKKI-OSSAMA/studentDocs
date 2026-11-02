@@ -81,6 +81,9 @@ async def test_password_is_encrypted_and_never_returned(setup):
     assert res.json()["has_password"] is False
     res = await superadmin.put(PATH, json={**payload, "password": None}, headers=csrf(superadmin))
     assert res.status_code == 422 and res.json()["error"]["code"] == "smtp_password_required"
+    # A password without a username would never be used to log in: refused.
+    res = await superadmin.put(PATH, json={**payload, "username": ""}, headers=csrf(superadmin))
+    assert res.status_code == 422
     # Header injection in the sender is rejected.
     res = await superadmin.put(
         PATH, json={**payload, "mail_from": "a@b.ma\r\nBcc: x@y.ma"}, headers=csrf(superadmin)
