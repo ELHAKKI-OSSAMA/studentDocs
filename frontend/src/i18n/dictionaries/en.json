@@ -112,7 +112,8 @@
     "smtp_address_refused": "The SMTP server refused the sender or the recipient.",
     "smtp_timeout": "The SMTP server is not responding (timeout).",
     "smtp_connection_failed": "Cannot connect to the SMTP server (wrong host, port or security).",
-    "smtp_password_required": "A password is required with a username."
+    "smtp_password_required": "A password is required with a username.",
+    "user_has_history": "This account has history (requests, documents, messages): it cannot be deleted. Deactivate it instead."
   },
   "home": {
     "title": "Your administrative documents, made simple",
@@ -266,7 +267,9 @@
     "activate": "Reactivate",
     "initialPassword": "Initial password",
     "initialPasswordHint": "At least 12 characters, with letters and digits. Share it securely.",
-    "searchPlaceholder": "Name or email…"
+    "searchPlaceholder": "Name or email…",
+    "deleteTitle": "Delete this account?",
+    "deleteText": "The account {email} will be permanently deleted. An account that already has requests or documents cannot be deleted: deactivate it."
   },
   "students": {
     "title": "Students",

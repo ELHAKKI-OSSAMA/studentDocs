@@ -2,8 +2,17 @@
 
 import { useDeferredValue, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
+import { PlusIcon, SearchIcon, Trash2Icon, UsersIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -103,7 +112,21 @@ export default function UsersPage() {
     ({ id, body }) => ({ path: `/admin/users/${id}`, method: "PATCH", body }),
     ["/admin/"],
   );
+  const remove = useApiMutation<string>((id) => ({ path: `/admin/users/${id}`, method: "DELETE" }), ["/admin/"]);
+  const [deleting, setDeleting] = useState<StaffUser | null>(null);
   const date = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
+
+  async function confirmDelete() {
+    if (!deleting) return;
+    try {
+      await remove.mutateAsync(deleting.id);
+      toast.success(t("common.deleted"));
+    } catch (err) {
+      toast.error(errorMessage(t, err));
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   async function patch(id: string, body: Record<string, unknown>) {
     try {
@@ -214,6 +237,18 @@ export default function UsersPage() {
                                   {t(u.is_active ? "users.deactivate" : "users.activate")}
                                 </Button>
                               )}
+                              {!self && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="ms-2 text-destructive"
+                                  onClick={() => setDeleting(u)}
+                                  data-testid={`delete-${u.email}`}
+                                >
+                                  <Trash2Icon />
+                                  {t("common.delete")}
+                                </Button>
+                              )}
                             </TableCell>
                           )}
                         </TableRow>
@@ -230,6 +265,22 @@ export default function UsersPage() {
         </CardContent>
       </Card>
       {creating && <CreateStaffDialog open={creating} onOpenChange={setCreating} />}
+      <AlertDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("users.deleteTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("users.deleteText", { email: deleting?.email ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <Button variant="destructive" onClick={confirmDelete} disabled={remove.isPending} data-testid="confirm-delete">
+              {t("common.delete")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

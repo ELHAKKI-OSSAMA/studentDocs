@@ -18,7 +18,7 @@ from app.admin.users_service import UserAdminService, to_user_out
 from app.auth.dependencies import Requires
 from app.auth.permissions import Perm
 from app.core.crud import Page, PageParams, commit_or_conflict
-from app.core.deps import DbSession
+from app.core.deps import ClientIp, DbSession
 from app.core.errors import NotFoundError
 from app.requests.models import TERMINAL_STATUSES, Request, RequestStatus
 from app.students.models import EnrollmentStatus, StudentEnrollment
@@ -91,6 +91,12 @@ async def create_staff(data: AdminCreate, db: DbSession, _: UsersManager):
 @router.patch("/users/{user_id}", response_model=UserOut)
 async def update_user(user_id: uuid.UUID, data: UserUpdate, db: DbSession, current: UsersManager):
     return to_user_out(await UserAdminService(db).update(current.user, user_id, data))
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(user_id: uuid.UUID, db: DbSession, current: UsersManager, ip: ClientIp) -> Response:
+    await UserAdminService(db).delete(current.user, user_id, ip)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # --- settings: institutional email domains ---------------------------------------------------------

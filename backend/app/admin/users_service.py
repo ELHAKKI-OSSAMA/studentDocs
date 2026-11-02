@@ -1,13 +1,15 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import AdminCreate, UserOut, UserUpdate
+from app.audit.service import record
 from app.auth.service import revoke_all_sessions
 from app.core.crud import PageParams, commit_or_conflict, paginate
-from app.core.errors import AppError, NotFoundError
+from app.core.errors import AppError, ConflictError, NotFoundError
 from app.core.security import hash_password
 from app.users.models import AuthIdentity, IdentityProvider, Role, User
 
@@ -98,3 +100,35 @@ class UserAdminService:
             await revoke_all_sessions(self.db, user)
         await commit_or_conflict(self.db)
         return user
+
+    async def delete(self, actor: User, user_id: uuid.UUID, ip: str | None) -> None:
+        """Hard delete, for accounts without history (e.g. a mistyped registration). An account with
+        requests, documents, messages or reviews is kept: the database refuses (RESTRICT) and the
+        administrator deactivates it instead, so the audit trail stays complete."""
+        user = await self.db.get(User, user_id)
+        if user is None:
+            raise NotFoundError("User not found")
+        if user.id == actor.id:
+            raise AppError.of(422, "cannot_modify_self", "You cannot delete your own account")
+        if user.role == Role.SUPER_ADMIN and user.is_active and await self._active_super_admins() <= 1:
+            raise AppError.of(422, "last_super_admin", "At least one active super-admin is required")
+        email, role = user.email, user.role
+        try:
+            # SQL DELETE: the database applies its own cascades (identities, tokens, student profile…)
+            # and refuses (RESTRICT) when the account has history.
+            await self.db.execute(delete(User).where(User.id == user_id))
+            record(
+                self.db,
+                actor_id=actor.id,
+                action="USER_DELETED",
+                entity="user",
+                entity_id=user_id,
+                ip=ip,
+                details={"email": email, "role": role.value},
+            )
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise ConflictError.of(
+                409, "user_has_history", "This account has history; deactivate it instead"
+            ) from exc
