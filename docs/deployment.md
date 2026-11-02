@@ -1,4 +1,4 @@
-# Déploiement en production : Vercel + Supabase + Brevo
+# Déploiement en production : Vercel + Supabase + Gmail (SMTP)
 
 Une seule base de code, un seul domaine public. Vercel héberge deux projets créés depuis le même dépôt GitHub :
 
@@ -9,7 +9,7 @@ navigateur ──► https://<domaine>  (projet Vercel « frontend », Next.js)
                                    + secret partagé              │
                                    + IP du client                ├──► Supabase Postgres (pooler, mode session)
                                                                  ├──► Supabase Storage (S3, bucket privé)
-                                                                 └──► Brevo (SMTP)
+                                                                 └──► Gmail (SMTP, port 465)
 ```
 
 Le proxy Next.js (`frontend/src/app/api/v1/[...path]/route.ts`) garde l'API sur le même domaine que le site :
@@ -20,7 +20,7 @@ le secret du proxy (`PROXY_SHARED_SECRET`), donc son adresse `*.vercel.app` n'es
 
 | Fonction | Stack Docker | Vercel |
 |---|---|---|
-| Emails sortants | file Celery | envoyés pendant la requête (`TASK_MODE=inline`) |
+| Emails sortants | file Celery | envoyés par Gmail pendant la requête (`TASK_MODE=inline`) |
 | Limites anti-abus, jetons révoqués | Redis | table Postgres `ephemeral_keys` (`EPHEMERAL_STORE=postgres`) |
 | Antivirus | ClamAV, fichier bloqué tant qu'il n'est pas CLEAN | **aucun** (`ANTIVIRUS=none`) : seuls les contrôles de type, taille et signature s'appliquent ; les fichiers sont marqués `antivirus_disabled` |
 | Réception d'emails (IMAP) et IA | worker + Beat | **désactivées** |
@@ -37,10 +37,13 @@ Limites du plan Vercel **Hobby** : usage non commercial uniquement, 60 s maximum
 3. **Storage** : créer un bucket **privé** nommé `studentdocs`.
 4. **Storage → S3 Connection** : copier l'endpoint et la région, puis créer une clé d'accès S3.
 
-## 2. Brevo
+## 2. Gmail (envoi des emails)
 
-1. **Senders, Domains** : valider l'adresse d'expédition (idéalement authentifier le domaine : SPF / DKIM).
-2. **SMTP & API → SMTP** : noter le login SMTP et générer une clé SMTP.
+1. Compte Google → **Sécurité** → activer la **validation en deux étapes**.
+2. **Mots de passe des applications** (https://myaccount.google.com/apppasswords) : créer un mot de passe
+   « StudentDocs » (16 caractères) : c'est `SMTP_PASSWORD`. `SMTP_USERNAME` et `MAIL_FROM` = l'adresse Gmail.
+
+Limite Gmail : environ 500 emails par jour ; au-delà, passer à un service d'envoi dédié.
 
 L'envoi peut aussi être configuré plus tard par le super admin dans **Paramètres → Serveur d'envoi (SMTP)** :
 la configuration enregistrée en base remplace alors celle des variables d'environnement.

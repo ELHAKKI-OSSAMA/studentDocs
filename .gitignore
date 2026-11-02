@@ -28,3 +28,10 @@ Thumbs.db
 # Playwright
 playwright-report/
 test-results/
+
+# Production secrets prepared locally (never committed)
+deploy/*.local.env
+.vercel
+
+.vercel
+.env*

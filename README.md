@@ -104,7 +104,7 @@ Une boîte institutionnelle est relevée en IMAP (lecture seule) par le service 
 
 `AI_READ_ATTACHMENTS` doit rester `false` : seul le corps de l'email est envoyé au modèle dans cette phase. Avec un modèle local (Ollama, vLLM, LM Studio), aucune donnée ne sort vers Internet ; si ce modèle tombe, les dossiers passent simplement en revue humaine.
 
-## Production (Vercel + Supabase + Brevo)
+## Production (Vercel + Supabase + Gmail SMTP)
 
 Procédure complète : [docs/deployment.md](docs/deployment.md). Le même code tourne en « profil serverless »
 (`TASK_MODE=inline`, `EPHEMERAL_STORE=postgres`, `ANTIVIRUS=none`) : pas de Redis, pas de worker Celery, pas de
